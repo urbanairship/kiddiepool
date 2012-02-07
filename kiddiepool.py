@@ -51,7 +51,7 @@ class KiddieConnection(object):
                  tcp_keepalives=True, timeout=DEFAULT_TIMEOUT):
         self.host = None
         self.port = None
-        self.connection = None
+        self.socket = None
         self.max_idle = max_idle
         self.tcp_keepalives = tcp_keepalives
         self.timeout = timeout
@@ -62,12 +62,12 @@ class KiddieConnection(object):
 
     @property
     def closed(self):
-        return self.connection is None
+        return self.socket is None
 
     def connect(self, host, port):
         self.host = host
         self.port = port
-        if self.connection is not None:
+        if self.socket is not None:
             self.close()
         try:
             self._open()
@@ -77,23 +77,22 @@ class KiddieConnection(object):
             return True
 
     def _open(self):
-        self.connection = socket.create_connection(
+        self.socket = socket.create_connection(
                 (self.host, self.port), timeout=self.timeout)
         if self.tcp_keepalives:
-            self.connection.setsockopt(
+            self.socket.setsockopt(
                     socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         self.touch()
-        self.closed = False
 
     def touch(self):
         self.last_touch = time.time()
 
     def close(self):
-        self.connection.close()
-        self.connection = None
+        self.socket.close()
+        self.socket = None
 
     def sendall(self, payload):
-        self.connection.sendall(payload)
+        self.socket.sendall(payload)
         self.touch()
 
     def handle_exception(self, e):
