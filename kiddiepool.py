@@ -47,17 +47,22 @@ class KiddieConnection(object):
      * Configurable timeout for socket operations
      * Tracks age and idle time for pools to refresh/cull idle/old connections
     """
-    def __init__(self, max_idle=DEFAULT_MAX_IDLE, tcp_keepalives=True,
-                 timeout=DEFAULT_TIMEOUT):
+    def __init__(self, lifetime=DEFAULT_LIFETIME, max_idle=DEFAULT_MAX_IDLE,
+                 tcp_keepalives=True, timeout=DEFAULT_TIMEOUT):
         self.host = None
         self.port = None
         self.connection = None
-        self.closed = True
         self.max_idle = max_idle
         self.tcp_keepalives = tcp_keepalives
         self.timeout = timeout
         self.last_touch = 0
         self.born = time.time()
+        if lifetime is not None:
+            self.lifetime = self.born + lifetime
+
+    @property
+    def closed(self):
+        return self.connection is None
 
     def connect(self, host, port):
         self.host = host
@@ -84,8 +89,8 @@ class KiddieConnection(object):
         self.last_touch = time.time()
 
     def close(self):
-        self.closed = True
         self.connection.close()
+        self.connection = None
 
     def sendall(self, payload):
         self.connection.sendall(payload)
