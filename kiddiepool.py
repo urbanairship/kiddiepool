@@ -39,6 +39,10 @@ class KiddieClientSendFailure(socket.error):
     """KiddieClient failed to send request"""
 
 
+class KiddieClientRecvFailure(socket.error):
+    """KiddieClient failed to receive response"""
+
+
 class KiddieConnection(object):
     """TCP Base Connection Class
 
@@ -94,6 +98,14 @@ class KiddieConnection(object):
     def sendall(self, payload):
         self.socket.sendall(payload)
         self.touch()
+
+    def recv(self, size, flags=0):
+        data = self.socket.recv(size, flags)
+        self.touch()
+        return data
+
+    def recvall(self, size):
+        return self.recv(size, socket.MSG_WAITALL)
 
     def handle_exception(self, e):
         """Close connection on socket errors"""
@@ -234,10 +246,21 @@ class KiddieClient(object):
     """
 
     SendException = KiddieClientSendFailure
+    RecvException = KiddieClientRecvFailure
 
     def __init__(self, pool, send_attempts=DEFAULT_SEND_ATTEMPTS):
         self.pool = pool
         self.send_attempts = send_attempts
+
+    def _recv(self, size):
+        """Recv -- No retry logic because that doesn't usually make sense"""
+        try:
+            with self.pool.connection() as conn:
+                return conn.recvall(size)
+        except socket.error as e:
+            raise self.RecvException('Failed to recv %s bytes. '
+                    'Last exception: %r ' % (size, e))
+
 
     def _sendall(self, request, attempts=None):
         """Fire-and-forget with configurable retries"""
