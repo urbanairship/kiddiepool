@@ -142,16 +142,15 @@ class KiddiePool(object):
        list (so bad servers will continue to get retried)
 
      `connect_attempts` is the number of times to try to connect to the
-     *entire* list of hosts. Likewise `send_attempts` is the number of times to
-     retry sends to the *entire* list of hosts.
-    """
+     *entire* list of hosts.
+     """
 
     connection_factory = KiddieConnection
 
     def __init__(self, hosts, connect_attempts=DEFAULT_CONNECT_ATTEMPTS,
                  connection_factory=None, connection_options=None,
-                 max_size=DEFAULT_POOL_MAX, pool_timeout=DEFAULT_POOL_TIMEOUT,
-                 send_attempts=DEFAULT_SEND_ATTEMPTS):
+                 max_size=DEFAULT_POOL_MAX,
+                 pool_timeout=DEFAULT_POOL_TIMEOUT):
         cleaned_hosts = []
         for host_pair in hosts:
             host, port = host_pair.split(':')
