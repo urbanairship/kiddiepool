@@ -212,9 +212,6 @@ class KiddiePool(object):
     def put(self, conn):
         """Put a connection back into the pool
 
-        Since there's a race condition where get() can create more connections
-        than max_size, silently close and drop a connection if the pool is full
-
         Returns instantly (no blocking)
         """
         try:
