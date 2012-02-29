@@ -11,5 +11,5 @@ setup(
     description='An extensible driver framework with pooling',
     long_description=open('README.rst').read(),
     py_modules=['kiddiepool'],
-    classifiers=['License :: OSI Approved :: Apache Software Licens'],
+    classifiers=['License :: OSI Approved :: Apache Software License'],
 )

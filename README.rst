@@ -1,6 +1,8 @@
 Kiddie Pool - Python Pooling Driver Framework
 =============================================
 
+© 2012 Urban Airship
+
 https://github.com/urbanairship/kiddiepool
 
 Goals
