@@ -257,7 +257,6 @@ class KiddieClient(object):
             raise self.RecvException('Failed to recv %s bytes. '
                     'Last exception: %r ' % (size, e))
 
-
     def _sendall(self, request, attempts=None):
         """Fire-and-forget with configurable retries"""
         e = None
