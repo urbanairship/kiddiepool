@@ -216,7 +216,6 @@ class KiddiePool(object):
         pool_timeout. Can block up to (retries * timeout) + pool_timeout
         seconds.
         """
-        # All connections are checked out, block
         try:
             conn = self.connection_pool.get(self.pool_timeout)
         except queue.Empty:
