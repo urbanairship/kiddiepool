@@ -1,5 +1,4 @@
 import collections
-import contextlib
 import Queue as queue
 import random
 import socket
@@ -41,6 +40,25 @@ class KiddieClientSendFailure(socket.error):
 
 class KiddieClientRecvFailure(socket.error):
     """KiddieClient failed to receive response"""
+
+
+class _ConnectionContext(object):
+    """Context Manager to handle Connections"""
+    def __init__(self, pool):
+        self.conn = None
+        self.pool = pool
+
+    def __enter__(self):
+        self.conn = self.pool.get()
+        return self.conn
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        # Regardless of whether or not the connection is valid, put it back
+        # in the pool. The next get() will determine it's validity.
+        self.pool.put(self.conn)
+        if exc_type is not None:
+            # Let handle_excption suppress the exception if desired
+            return bool(self.conn.handle_exception(exc_value))
 
 
 class KiddieConnection(object):
@@ -205,8 +223,16 @@ class KiddiePool(object):
             raise KiddiePoolEmpty(
                     'All %d connections checked out' % self.max_size)
 
-        if not conn.validate():
-            self._connect(conn)
+        # If anything fails before we return the connection we have to put the
+        # connection back into the pool as the caller won't have a reference to
+        # it
+        try:
+            if not conn.validate():
+                self._connect(conn)
+        except:
+            # Could not connect, return connection to pool and re-raise
+            self.put(conn)
+            raise
         return conn
 
     def put(self, conn):
@@ -220,19 +246,8 @@ class KiddiePool(object):
             # This is an overflow connection, close it
             conn.close()
 
-    @contextlib.contextmanager
     def connection(self):
-        conn = self.get()
-        try:
-            yield conn
-        except Exception as e:
-            if not conn.handle_exception(e):
-                # Connection didn't handle exception, re-raise
-                raise
-        finally:
-            # Regardless of whether or not the connection is valid, put it back
-            # in the pool. The next get() will determine it's validity.
-            self.put(conn)
+        return _ConnectionContext(self)
 
 
 class KiddieClient(object):
