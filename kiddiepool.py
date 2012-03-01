@@ -217,7 +217,7 @@ class KiddiePool(object):
         seconds.
         """
         try:
-            conn = self.connection_pool.get(self.pool_timeout)
+            conn = self.connection_pool.get(timeout=self.pool_timeout)
         except queue.Empty:
             raise KiddiePoolEmpty(
                     'All %d connections checked out' % self.max_size)
