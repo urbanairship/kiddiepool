@@ -57,7 +57,7 @@ class _ConnectionContext(object):
         # in the pool. The next get() will determine it's validity.
         self.pool.put(self.conn)
         if exc_type is not None:
-            # Let handle_excption suppress the exception if desired
+            # Let handle_exception suppress the exception if desired
             return bool(self.conn.handle_exception(exc_value))
 
 
@@ -79,8 +79,10 @@ class KiddieConnection(object):
         self.timeout = timeout
         self.last_touch = 0
         self.born = time.time()
-        if lifetime is not None:
-            self.lifetime = self.born + lifetime
+        # lifespan is how many seconds the connection lives
+        self.lifespan = lifetime
+        # lifetime is when the connection should die and be reconnected
+        self.lifetime = 0
 
     @property
     def closed(self):
@@ -104,7 +106,13 @@ class KiddieConnection(object):
         if self.tcp_keepalives:
             self.socket.setsockopt(
                     socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
+        # Touch to update the idle check
         self.touch()
+
+        # Reset lifetime
+        if self.lifepsan is not None:
+            self.lifetime = time.time() + self.lifespan
 
     def touch(self):
         self.last_touch = time.time()
@@ -144,7 +152,7 @@ class KiddieConnection(object):
             # Invalid because it's been idle too long
             return False
 
-        if self.lifetime is not None and self.lifetime < now:
+        if self.lifespan is not None and self.lifetime < now:
             # Invalid because it's outlived its lifetime
             return False
 
