@@ -122,21 +122,7 @@ class KiddieConnection(object):
         self.socket = None
 
     def sendall(self, payload):
-        """Reimplement socket.sendall since it had issues under modwsgi
-
-        http://www.weirdlooking.com/blog/interrupts-in-python-io
-        """
-        total_sent = 0
-        total_to_send = len(payload)
-
-        # Keep sending until sent == total
-        while total_sent < total_to_send:
-            # Send unsent part
-            sent = self.socket.send(payload[total_sent:])
-            if sent == 0:
-                raise KiddieClientSendFailure(
-                        'Disconnected after %d byes sent' % total_sent)
-            total_sent += sent
+        self.socket.sendall(payload)
         self.touch()
 
     def recv(self, size, flags=0):
