@@ -79,10 +79,10 @@ class KiddieConnection(object):
         self.timeout = timeout
         self.last_touch = 0
         self.born = time.time()
-        # lifespan is how many seconds the connection lives
-        self.lifespan = lifetime
-        # lifetime is when the connection should die and be reconnected
-        self.lifetime = 0
+        # lifetime is how many seconds the connection lives
+        self.lifetime = lifetime
+        # endoflife is when the connection should die and be reconnected
+        self.endoflife = 0
 
     @property
     def closed(self):
@@ -110,9 +110,9 @@ class KiddieConnection(object):
         # Touch to update the idle check
         self.touch()
 
-        # Reset lifetime
-        if self.lifepsan is not None:
-            self.lifetime = time.time() + self.lifespan
+        # Reset endoflife
+        if self.lifetime is not None:
+            self.endoflife = time.time() + self.lifetime
 
     def touch(self):
         self.last_touch = time.time()
@@ -152,7 +152,7 @@ class KiddieConnection(object):
             # Invalid because it's been idle too long
             return False
 
-        if self.lifespan is not None and self.lifetime < now:
+        if self.lifetime is not None and self.endoflife < now:
             # Invalid because it's outlived its lifetime
             return False
 
