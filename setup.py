@@ -4,7 +4,7 @@ from setuptools import setup
 setup(
     name='kiddiepool',
     url='https://github.com/urbanairship/kiddiepool',
-    version='0.1.2',
+    version='0.1.3',
     license='Apache',
     author='Michael Schurter',
     author_email='schmichael@urbanairship.com',
