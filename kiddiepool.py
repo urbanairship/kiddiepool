@@ -1,3 +1,4 @@
+# Copyright 2012 Urban Airship
 import collections
 import Queue as queue
 import random
@@ -298,3 +299,35 @@ class KiddieClient(object):
             raise self.SendException(
                     'Failed to send request (%d bytes) after %d attempts. '
                     'Last exception: %r' % (len(request), attempts, e))
+
+
+class FakeConnection(object):
+    """Connection class for testing (noops)"""
+    def __init__(self, *args, **kwargs):
+        self.host = kwargs.get('host', 'localhost')
+        self.port = kwargs.get('port', 9000)
+        self.closed = kwargs.get('closed', False)
+
+    def connect(self, host, port):
+        self.host = host
+        self.port = port
+        return True
+
+    def close(self):
+        self.closed = True
+
+    def sendall(self, payload):
+        pass
+
+    def recv(self, size, flags=0):
+        return ''
+
+    def recvall(self, size):
+        return ''
+
+    def handle_exception(self, e):
+        if isinstance(e, socket.error):
+            self.close()
+
+    def validate(self):
+        return True
