@@ -8,7 +8,7 @@ import time
 
 # Pool classes/defaults
 CandidatePool = collections.deque
-ConnectionPool = queue.Queue
+ConnectionPool = queue.LifoQueue
 DEFAULT_POOL_MAX = 10
 DEFAULT_POOL_TIMEOUT = 2
 DEFAULT_CONNECT_ATTEMPTS = 2
