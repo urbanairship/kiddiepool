@@ -136,7 +136,7 @@ class KiddieConnection(object):
         while len(data) < size:
             chunk = self.recv(size - len(data))
             if not chunk:
-                return data
+                raise KiddieClientRecvFailure('Received %d bytes out of %d.' % (len(data), size))
             data += chunk
         return data
 
