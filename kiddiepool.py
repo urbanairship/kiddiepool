@@ -132,13 +132,15 @@ class KiddieConnection(object):
         return data
 
     def recvall(self, size):
-        data = ''
-        while len(data) < size:
+        data = []
+        received = 0
+        while received < size:
             chunk = self.recv(size - len(data))
             if not chunk:
                 raise KiddieClientRecvFailure('Received %d bytes out of %d.' % (len(data), size))
-            data += chunk
-        return data
+            data.append(chunk)
+            received += len(chunk)
+        return b"".join(data)
 
     def handle_exception(self, e):
         """Close connection on socket errors"""
