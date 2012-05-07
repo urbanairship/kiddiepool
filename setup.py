@@ -12,5 +12,6 @@ setup(
     long_description=open('README.rst').read(),
     py_modules=['kiddiepool', 'test_kiddiepool'],
     tests_require=['mox'],
+    test_suite='test_kiddiepool',
     classifiers=['License :: OSI Approved :: Apache Software License'],
 )
