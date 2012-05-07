@@ -139,7 +139,7 @@ class KiddieConnection(object):
             chunk = self.recv(size - received)
             if not chunk:
                 raise KiddieClientRecvFailure(
-                        'Received %d bytes out of %d.' % (len(data), size))
+                        'Received %d bytes out of %d.' % (received, size))
             data.append(chunk)
             received += len(chunk)
         return b"".join(data)
