@@ -5,6 +5,10 @@ Kiddie Pool - Python Pooling Driver Framework
 
 https://github.com/urbanairship/kiddiepool
 
+
+.. image:: https://secure.travis-ci.org/urbanairship/kiddiepool.png?branch=master
+   :target: http://travis-ci.org/urbanairship/kiddiepool/
+
 Goals
 -----
 
@@ -15,8 +19,6 @@ Creating a New Client
 
 Subclass at least ``KiddieClient`` to create the public API for your client
 driver.  Should call ``KiddieClient._sendall(<str>)`` to send data.
-
-*TODO* Support ``recv()`` ing data too
 
 *TODO* Have the client create it's own pool?
 
