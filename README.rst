@@ -20,8 +20,6 @@ Creating a New Client
 Subclass at least ``KiddieClient`` to create the public API for your client
 driver.  Should call ``KiddieClient._sendall(<str>)`` to send data.
 
-*TODO* Have the client create it's own pool?
-
 Using the Pool
 --------------
 
