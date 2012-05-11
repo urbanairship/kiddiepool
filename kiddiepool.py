@@ -59,7 +59,8 @@ class _ConnectionContext(object):
         self.pool.put(self.conn)
         if exc_type is not None:
             # Let handle_exception suppress the exception if desired
-            return bool(self.conn.handle_exception(exc_value))
+            return bool(
+                    self.conn.handle_exception(exc_type, exc_value, exc_tb))
 
 
 class KiddieConnection(object):
@@ -144,9 +145,9 @@ class KiddieConnection(object):
             received += len(chunk)
         return b"".join(data)
 
-    def handle_exception(self, e):
+    def handle_exception(self, exc_type, exc_value, exc_tb):
         """Close connection on socket errors"""
-        if isinstance(e, socket.error):
+        if issubclass(exc_type, socket.error):
             self.close()
 
     def validate(self):
@@ -335,8 +336,8 @@ class FakeConnection(object):
     def recvall(self, size):
         return ''
 
-    def handle_exception(self, e):
-        if isinstance(e, socket.error):
+    def handle_exception(self, et, ev, etb):
+        if issubclass(et, socket.error):
             self.close()
 
     def validate(self):
