@@ -11,7 +11,7 @@ setup(
     description='An extensible driver framework with pooling',
     long_description=open('README.rst').read(),
     py_modules=['kiddiepool', 'test_kiddiepool'],
-    tests_require=['mox'],
+    tests_require=['mimic'],
     test_suite='test_kiddiepool',
     classifiers=['License :: OSI Approved :: Apache Software License'],
 )
