@@ -1,49 +1,77 @@
 import socket
 
-import mox
+import mimic
 
 import kiddiepool
 
 
-class TestKiddieConnection(mox.MoxTestBase):
+class TestKiddieConnection(mimic.MimicTestBase):
     def setUp(self):
         super(TestKiddieConnection, self).setUp()
         self.conn = kiddiepool.KiddieConnection()
-        self.mox.StubOutWithMock(self.conn, 'recv')
 
     def test_simple_recvall(self):
-        self.conn.recv(3).AndReturn('123')
+        self.mimic.stub_out_with_mock(self.conn, 'recv')
+        self.conn.recv(3).and_return('123')
 
-        self.mox.ReplayAll()
+        self.mimic.replay_all()
 
         data = self.conn.recvall(3)
         self.assertEqual('123', data)
 
     def test_multi_read_recvall(self):
-        self.conn.recv(10).AndReturn('123')
-        self.conn.recv(7).AndReturn('456')
-        self.conn.recv(4).AndReturn('789')
-        self.conn.recv(1).AndReturn('0')
+        self.mimic.stub_out_with_mock(self.conn, 'recv')
+        self.conn.recv(10).and_return('123')
+        self.conn.recv(7).and_return('456')
+        self.conn.recv(4).and_return('789')
+        self.conn.recv(1).and_return('0')
 
-        self.mox.ReplayAll()
+        self.mimic.replay_all()
 
         data = self.conn.recvall(10)
         self.assertEqual('1234567890', data)
 
     def test_failed_recvall(self):
-        self.conn.recv(10).AndReturn('123')
-        self.conn.recv(7).AndReturn('456')
-        self.conn.recv(4).AndReturn('789')
-        self.conn.recv(1).AndReturn('')
+        self.mimic.stub_out_with_mock(self.conn, 'recv')
+        self.conn.recv(10).and_return('123')
+        self.conn.recv(7).and_return('456')
+        self.conn.recv(4).and_return('789')
+        self.conn.recv(1).and_return('')
 
-        self.mox.ReplayAll()
+        self.mimic.replay_all()
 
         self.assertRaises(
-                kiddiepool.KiddieClientRecvFailure, self.conn.recvall, 10)
+            kiddiepool.KiddieConnectionRecvFailure,
+            self.conn.recvall,
+            10
+        )
 
     def test_broken_pipe(self):
+        self.mimic.stub_out_with_mock(self.conn, 'recv')
         self.conn.recv(10)\
-                .AndRaise(socket.error(socket.errno.EPIPE, 'Broken pipe'))
-        self.mox.ReplayAll()
+                .and_raise(socket.error(socket.errno.EPIPE, 'Broken pipe'))
+        self.mimic.replay_all()
 
-        self.assertRaises(socket.error, self.conn.recvall, 10)
+        self.assertRaises(
+            kiddiepool.KiddieConnectionRecvFailure,
+            self.conn.recvall,
+            10
+        )
+
+    def test_socket_error_conversion_to_kiddiepool_socket_error(self):
+        arbitrary_size = 10
+        arbitrary_flags = 0
+
+        self.conn.socket = self.mimic.create_mock_anything()
+        self.conn.socket.recv(arbitrary_size, arbitrary_flags).and_raise(
+            socket.error
+        )
+
+        self.mimic.replay_all()
+
+        self.assertRaises(
+            kiddiepool.KiddieConnectionRecvFailure,
+            self.conn.recv,
+            arbitrary_size,
+            arbitrary_flags,
+        )

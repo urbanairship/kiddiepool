@@ -35,11 +35,23 @@ class KiddiePoolMaxAttempts(KiddieException, socket.error):
     """
 
 
-class KiddieClientSendFailure(socket.error):
+class KiddieSocketError(socket.error):
+    """Base class for KiddieClientSend/Recv failures."""
+
+
+class KiddieConnectionSendFailure(KiddieSocketError):
+    """ KiddieConnection failed to send request """
+
+
+class KiddieConnectionRecvFailure(KiddieSocketError):
+    """ KiddieConnection failed to receive response """
+
+
+class KiddieClientSendFailure(KiddieConnectionSendFailure):
     """KiddieClient failed to send request"""
 
 
-class KiddieClientRecvFailure(socket.error):
+class KiddieClientRecvFailure(KiddieConnectionRecvFailure):
     """KiddieClient failed to receive response"""
 
 
@@ -71,6 +83,10 @@ class KiddieConnection(object):
      * Configurable timeout for socket operations
      * Tracks age and idle time for pools to refresh/cull idle/old connections
     """
+
+    SendException = KiddieConnectionSendFailure
+    RecvException = KiddieConnectionRecvFailure
+
     def __init__(self, lifetime=DEFAULT_LIFETIME, max_idle=DEFAULT_MAX_IDLE,
                  tcp_keepalives=True, timeout=DEFAULT_TIMEOUT):
         self.host = None
@@ -124,11 +140,17 @@ class KiddieConnection(object):
         self.socket = None
 
     def sendall(self, payload):
-        self.socket.sendall(payload)
+        try:
+            self.socket.sendall(payload)
+        except socket.error as e:
+            raise self.SendException(e)
         self.touch()
 
     def recv(self, size, flags=0):
-        data = self.socket.recv(size, flags)
+        try:
+            data = self.socket.recv(size, flags)
+        except socket.error as e:
+            raise self.RecvException(e)
         self.touch()
         return data
 
@@ -136,13 +158,17 @@ class KiddieConnection(object):
         """Receive `size` data and return it or raise a socket.error"""
         data = []
         received = 0
-        while received < size:
-            chunk = self.recv(size - received)
-            if not chunk:
-                raise KiddieClientRecvFailure(
-                        'Received %d bytes out of %d.' % (received, size))
-            data.append(chunk)
-            received += len(chunk)
+        try:
+            while received < size:
+                chunk = self.recv(size - received)
+                if not chunk:
+                    raise self.RecvException(
+                        'Received %d bytes out of %d.' % (received, size)
+                    )
+                data.append(chunk)
+                received += len(chunk)
+        except socket.error as e:
+            raise self.RecvException(e)
         return b"".join(data)
 
     def handle_exception(self, exc_type, exc_value, exc_tb):
