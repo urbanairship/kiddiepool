@@ -9,9 +9,9 @@ class TestKiddieConnection(mimic.MimicTestBase):
     def setUp(self):
         super(TestKiddieConnection, self).setUp()
         self.conn = kiddiepool.KiddieConnection()
-        self.mimic.stub_out_with_mock(self.conn, 'recv')
 
     def test_simple_recvall(self):
+        self.mimic.stub_out_with_mock(self.conn, 'recv')
         self.conn.recv(3).and_return('123')
 
         self.mimic.replay_all()
@@ -20,6 +20,7 @@ class TestKiddieConnection(mimic.MimicTestBase):
         self.assertEqual('123', data)
 
     def test_multi_read_recvall(self):
+        self.mimic.stub_out_with_mock(self.conn, 'recv')
         self.conn.recv(10).and_return('123')
         self.conn.recv(7).and_return('456')
         self.conn.recv(4).and_return('789')
@@ -31,6 +32,7 @@ class TestKiddieConnection(mimic.MimicTestBase):
         self.assertEqual('1234567890', data)
 
     def test_failed_recvall(self):
+        self.mimic.stub_out_with_mock(self.conn, 'recv')
         self.conn.recv(10).and_return('123')
         self.conn.recv(7).and_return('456')
         self.conn.recv(4).and_return('789')
@@ -45,6 +47,7 @@ class TestKiddieConnection(mimic.MimicTestBase):
         )
 
     def test_broken_pipe(self):
+        self.mimic.stub_out_with_mock(self.conn, 'recv')
         self.conn.recv(10)\
                 .and_raise(socket.error(socket.errno.EPIPE, 'Broken pipe'))
         self.mimic.replay_all()
@@ -53,4 +56,22 @@ class TestKiddieConnection(mimic.MimicTestBase):
             kiddiepool.KiddieConnectionRecvFailure,
             self.conn.recvall,
             10
+        )
+
+    def test_socket_error_conversion_to_kiddiepool_socket_error(self):
+        arbitrary_size = 10
+        arbitrary_flags = 0
+
+        self.conn.socket = self.mimic.create_mock_anything()
+        self.conn.socket.recv(arbitrary_size, arbitrary_flags).and_raise(
+            socket.error
+        )
+
+        self.mimic.replay_all()
+
+        self.assertRaises(
+            kiddiepool.KiddieConnectionRecvFailure,
+            self.conn.recv,
+            arbitrary_size,
+            arbitrary_flags,
         )
