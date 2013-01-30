@@ -35,11 +35,15 @@ class KiddiePoolMaxAttempts(KiddieException, socket.error):
     """
 
 
-class KiddieClientSendFailure(socket.error):
+class KiddieClientSocketError(socket.error):
+    """Base class for KiddieClientSend/Recv failures."""
+
+
+class KiddieClientSendFailure(KiddieClientSocketError):
     """KiddieClient failed to send request"""
 
 
-class KiddieClientRecvFailure(socket.error):
+class KiddieClientRecvFailure(KiddieClientSocketError):
     """KiddieClient failed to receive response"""
 
 
