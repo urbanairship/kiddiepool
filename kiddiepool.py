@@ -35,15 +35,23 @@ class KiddiePoolMaxAttempts(KiddieException, socket.error):
     """
 
 
-class KiddieClientSocketError(socket.error):
+class KiddieSocketError(socket.error):
     """Base class for KiddieClientSend/Recv failures."""
 
 
-class KiddieClientSendFailure(KiddieClientSocketError):
+class KiddieConnectionSendFailure(KiddieSocketError):
+    """ KiddieConnection failed to send request """
+
+
+class KiddieConnectionRecvFailure(KiddieSocketError):
+    """ KiddieConnection failed to receive response """
+
+
+class KiddieClientSendFailure(KiddieConnectionSendFailure):
     """KiddieClient failed to send request"""
 
 
-class KiddieClientRecvFailure(KiddieClientSocketError):
+class KiddieClientRecvFailure(KiddieConnectionRecvFailure):
     """KiddieClient failed to receive response"""
 
 
@@ -76,8 +84,8 @@ class KiddieConnection(object):
      * Tracks age and idle time for pools to refresh/cull idle/old connections
     """
 
-    SendException = KiddieClientSendFailure
-    RecvException = KiddieClientRecvFailure
+    SendException = KiddieConnectionSendFailure
+    RecvException = KiddieConnectionRecvFailure
 
     def __init__(self, lifetime=DEFAULT_LIFETIME, max_idle=DEFAULT_MAX_IDLE,
                  tcp_keepalives=True, timeout=DEFAULT_TIMEOUT):

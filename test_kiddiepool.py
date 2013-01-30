@@ -39,11 +39,18 @@ class TestKiddieConnection(mox.MoxTestBase):
         self.mox.ReplayAll()
 
         self.assertRaises(
-                kiddiepool.KiddieClientRecvFailure, self.conn.recvall, 10)
+            kiddiepool.KiddieConnectionRecvFailure,
+            self.conn.recvall,
+            10
+        )
 
     def test_broken_pipe(self):
         self.conn.recv(10)\
                 .AndRaise(socket.error(socket.errno.EPIPE, 'Broken pipe'))
         self.mox.ReplayAll()
 
-        self.assertRaises(socket.error, self.conn.recvall, 10)
+        self.assertRaises(
+            kiddiepool.KiddieConnectionRecvFailure,
+            self.conn.recvall,
+            10
+        )
