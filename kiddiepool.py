@@ -5,6 +5,8 @@ import random
 import socket
 import time
 
+from kazoo.client import KazooClient
+
 
 # Pool classes/defaults
 CandidatePool = collections.deque
@@ -55,6 +57,10 @@ class KiddieClientRecvFailure(KiddieConnectionRecvFailure):
     """KiddieClient failed to receive response"""
 
 
+class KiddieZookeeperException(KiddieException):
+    """TidePool failed to connect to Zookeeper"""
+
+
 class _ConnectionContext(object):
     """Context Manager to handle Connections"""
     def __init__(self, pool):
@@ -72,7 +78,8 @@ class _ConnectionContext(object):
         if exc_type is not None:
             # Let handle_exception suppress the exception if desired
             return bool(
-                    self.conn.handle_exception(exc_type, exc_value, exc_tb))
+                self.conn.handle_exception(exc_type, exc_value, exc_tb)
+            )
 
 
 class KiddieConnection(object):
@@ -120,10 +127,12 @@ class KiddieConnection(object):
 
     def _open(self):
         self.socket = socket.create_connection(
-                (self.host, self.port), timeout=self.timeout)
+            (self.host, self.port), timeout=self.timeout
+        )
         if self.tcp_keepalives:
             self.socket.setsockopt(
-                    socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1
+            )
 
         # Touch to update the idle check
         self.touch()
@@ -220,8 +229,7 @@ class KiddiePool(object):
             host, port = host_pair.split(':')
             cleaned_hosts.append((host, int(port)))
         random.shuffle(cleaned_hosts)
-        self.candidate_pool = CandidatePool(
-            cleaned_hosts, maxlen=len(cleaned_hosts))
+        self.candidate_pool = CandidatePool(cleaned_hosts)
         self.connection_pool = ConnectionPool(maxsize=max_size)
         self.pool_timeout = pool_timeout
         self.max_size = max_size
@@ -266,7 +274,8 @@ class KiddiePool(object):
             conn = self.connection_pool.get(timeout=self.pool_timeout)
         except queue.Empty:
             raise KiddiePoolEmpty(
-                    'All %d connections checked out' % self.max_size)
+                'All %d connections checked out' % self.max_size
+            )
 
         # If anything fails before we return the connection we have to put the
         # connection back into the pool as the caller won't have a reference to
@@ -295,6 +304,86 @@ class KiddiePool(object):
         return _ConnectionContext(self)
 
 
+class TidePool(object):
+    """Multithreaded, ZooKeeper-bound KiddiePool wrapper.
+
+    While context manager is active, a thread will monitor the children
+    of the give znode, and set them as the KiddiePool hosts whenever
+    they change."""
+
+    def __init__(self, zk_quorum, znode_parent, **kwargs):
+        self.zk_quorum = zk_quorum
+        self.znode_parent = znode_parent
+        self.kwargs = kwargs
+        self.pool = None
+
+    def __enter__(self):
+        self._zk_session = KazooClient(self.zk_quorum, read_only=True)
+        self._zk_session.start()
+
+        self._initial_set = True
+        self._host_setter = self._zk_session.ChildrenWatch(self.znode_parent)(
+            self.set_hosts
+        )
+
+        self.pool = KiddiePool(self.initial_hosts, **self.kwargs)
+
+        del self.initial_hosts
+
+        return self.pool
+
+    def __exit__(self, *args):
+        self._zk_session.stop()
+
+    def start(self):
+        return self.__enter__()
+
+    def stop(self, *args):
+        return self.__exit__(*args)
+
+    def set_hosts(self, hosts):
+        if self._initial_set:
+            self.initial_hosts = hosts
+            self._initial_set = False
+            return
+
+        cleaned_hosts = []
+        for host_pair in hosts:
+            host, port = host_pair.split(':')
+            cleaned_hosts.append((host, int(port)))
+
+        self.pool.candidate_pool = CandidatePool(cleaned_hosts)
+
+    def get(self):
+        """Get a connection from the pool
+
+        Raises `KiddiePoolEmpty` if no connections are available after
+        pool_timeout. Can block up to (retries * timeout) + pool_timeout
+        seconds.
+        """
+        try:
+            conn = self.connection_pool.get(timeout=self.pool_timeout)
+        except queue.Empty:
+            raise KiddiePoolEmpty(
+                'All %d connections checked out' % self.max_size
+            )
+
+        # If anything fails before we return the connection we have to put the
+        # connection back into the pool as the caller won't have a reference to
+        # it
+        try:
+            # This additional check should invalidate existing connections to
+            # to hosts that have dropped out of zookeeper
+            host_tuple = (conn.host, conn.port)
+            if not conn.validate() and host_tuple in self.candidate_pool:
+                self._connect(conn)
+        except Exception:
+            # Could not connect, return connection to pool and re-raise
+            self.put(conn)
+            raise
+        return conn
+
+
 class KiddieClient(object):
     """Thread-safe wrapper around a KiddiePool of KiddieConnections
 
@@ -314,8 +403,9 @@ class KiddieClient(object):
             with self.pool.connection() as conn:
                 return conn.recvall(size)
         except socket.error as e:
-            raise self.RecvException('Failed to recv %s bytes. '
-                    'Last exception: %r ' % (size, e))
+            raise self.RecvException(
+                'Failed to recv %s bytes. Last exception: %r ' % (size, e)
+            )
 
     def _sendall(self, request, attempts=None):
         """Fire-and-forget with configurable retries"""
@@ -334,8 +424,9 @@ class KiddieClient(object):
         else:
             # for-loop exited meaning attempts were exhausted
             raise self.SendException(
-                    'Failed to send request (%d bytes) after %d attempts. '
-                    'Last exception: %r' % (len(request), attempts, e))
+                'Failed to send request (%d bytes) after %d attempts. '
+                'Last exception: %r' % (len(request), attempts, e)
+            )
 
 
 class FakeConnection(object):
