@@ -352,10 +352,7 @@ class TidePool(object):
             raise KiddieZookeeperException("Could not connect to zookeeper.")
 
         # Spawn Zookeeper monitoring thread
-        self._zk_session.ChildrenWatch(
-            self.znode_parent,
-            func=self.set_hosts
-        )
+        self._zk_session.ChildrenWatch(self.znode_parent, func=self.set_hosts)
 
         # Do initial KiddiePool setup
         if not self.pool:
