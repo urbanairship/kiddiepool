@@ -316,9 +316,12 @@ class TidePool(object):
 
     While context manager is active, a thread will monitor the children
     of the given znode and set them as the KiddiePool hosts whenever
-    they change."""
+    they change.
 
-    def __init__(self, zk_quorum, znode_parent,
+    KiddiePool hosts can also be set manually, without using Zookeeper.
+    """
+
+    def __init__(self, zk_quorum=None, znode_parent=None,
                  zk_timeout=DEFAULT_ZOOKEEPER_TIMEOUT, **kwargs):
         self.zk_quorum = zk_quorum
         self.znode_parent = znode_parent
@@ -327,41 +330,49 @@ class TidePool(object):
         self.pool = None
 
     def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *args):
+        return self.stop(*args)
+
+    def start(self):
+        """Build new Zookeeper session; start watching znode_parent's children.
+
+        This method returns the pool, since that's what's really useful."""
         self._zk_session = KazooClient(
             self.zk_quorum,
             timeout=self.zk_timeout,
             read_only=True
         )
 
+        # Start the session with Zookeeper
         try:
             self._zk_session.start(self.zk_timeout)
         except KazooTimeoutError:
             raise KiddieZookeeperException("Could not connect to zookeeper.")
 
-        self._initial_set = True
-        self._host_setter = self._zk_session.ChildrenWatch(self.znode_parent)(
-            self.set_hosts
+        # Spawn Zookeeper monitoring thread
+        self._zk_session.ChildrenWatch(
+            self.znode_parent,
+            func=self.set_hosts
         )
 
-        self.pool = KiddiePool(self.initial_hosts, **self.kwargs)
+        # Do initial KiddiePool setup
+        if not self.pool:
+            self.pool = KiddiePool(self._initial_hosts, **self.kwargs)
 
-        del self.initial_hosts
+            del self._initial_hosts
 
         return self.pool
 
-    def __exit__(self, *args):
+    def stop(self, *args):
+        """Stop Zookeeper session. Pool will remain but will not be updated."""
         self._zk_session.stop()
 
-    def start(self):
-        return self.__enter__()
-
-    def stop(self, *args):
-        return self.__exit__(*args)
-
     def set_hosts(self, hosts):
-        if self._initial_set:
-            self.initial_hosts = hosts
-            self._initial_set = False
+        """Used by Zookeeper as callback. Can also be run manually."""
+        if not self.pool:
+            self._initial_hosts = hosts
             return
 
         cleaned_hosts = []
