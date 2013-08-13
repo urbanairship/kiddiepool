@@ -1,7 +1,7 @@
 Kiddie Pool - Python Pooling Driver Framework
 =============================================
 
-© 2012 Urban Airship
+© 2013 Urban Airship
 
 https://github.com/urbanairship/kiddiepool
 
@@ -13,6 +13,7 @@ Goals
 -----
 
 * Create a reusable connection pool class that handles failover
+* Allow connection pool to discover service locations via Zookeeper
 
 Creating a New Client
 ---------------------
@@ -23,6 +24,18 @@ driver.  Should call ``KiddieClient._sendall(<str>)`` to send data.
 Using the Pool
 --------------
 
-1. Create a ``KiddiePool`` of connections (``KiddieConnections``)
-2. Pass the pool instance to your ``KiddieClient`` subclass for use
-3. Use your client's API and it will use the pool automatically
+Using a static pool
+~~~~~~~~~~~~~~~~~~~
+
+#. Create a list of "<host>:<port>"" strings to target for connections
+#. Instantiate a ``KiddiePool`` with that list of strings.
+#. Pass the KiddiePool instance to your ``KiddieClient`` subclass for use
+#. Use your client's API and it will use the pool automatically
+
+
+Using a dynamic pool
+~~~~~~~~~~~~~~~~~~~~
+
+#. Instantiate a TidePool with the Zookeeper quorum and znode whose children to monitor
+#. Use a context manager ``with TidePool() as pool:`` or the ``start()`` and ``stop()`` methods to manage the connection to Zookeeper
+#. Draw connections to your target service from the TidePool.pool as with the static KiddiePool.

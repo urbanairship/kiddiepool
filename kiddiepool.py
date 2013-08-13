@@ -106,7 +106,6 @@ class KiddieConnection(object):
         self.tcp_keepalives = tcp_keepalives
         self.timeout = timeout
         self.last_touch = 0
-        self.born = time.time()
         # lifetime is how many seconds the connection lives
         self.lifetime = lifetime
         # endoflife is when the connection should die and be reconnected
@@ -216,6 +215,7 @@ class KiddiePool(object):
      * Retries servers on faults
      * Rebalances by giving connections a lifetime and never culling candidate
        list (so bad servers will continue to get retried)
+     * host-port pairs can be reset on the fly
 
      `connect_attempts` is the number of times to try to connect to the
      *entire* list of hosts.
@@ -227,12 +227,8 @@ class KiddiePool(object):
                  connection_factory=None, connection_options=None,
                  max_size=DEFAULT_POOL_MAX,
                  pool_timeout=DEFAULT_POOL_TIMEOUT):
-        cleaned_hosts = []
-        for host_pair in hosts:
-            host, port = host_pair.split(':')
-            cleaned_hosts.append((host, int(port)))
-        random.shuffle(cleaned_hosts)
-        self.candidate_pool = CandidatePool(cleaned_hosts)
+
+        self.set_hosts(hosts)
         self.connection_pool = ConnectionPool(maxsize=max_size)
         self.pool_timeout = pool_timeout
         self.max_size = max_size
@@ -310,6 +306,16 @@ class KiddiePool(object):
     def connection(self):
         return _ConnectionContext(self)
 
+    def set_hosts(self, hosts):
+        """Initialize the candidate_pool. Can be rerun on the fly."""
+        cleaned_hosts = []
+        for host_pair in hosts:
+            host, port = host_pair.split(':')
+            cleaned_hosts.append((host, int(port)))
+        random.shuffle(cleaned_hosts)
+
+        self.candidate_pool = CandidatePool(cleaned_hosts)
+
 
 class TidePool(object):
     """Multithreaded, ZooKeeper-bound KiddiePool wrapper.
@@ -319,14 +325,16 @@ class TidePool(object):
     they change.
 
     KiddiePool hosts can also be set manually, without using Zookeeper.
+
+    Any keyword arguments not listed will be passed on to KiddiePool.
     """
 
-    def __init__(self, zk_quorum=None, znode_parent=None,
+    def __init__(self, zk_quorum, znode_parent,
                  zk_timeout=DEFAULT_ZOOKEEPER_TIMEOUT, **kwargs):
-        self.zk_quorum = zk_quorum
-        self.znode_parent = znode_parent
-        self.zk_timeout = zk_timeout
-        self.kwargs = kwargs
+        self._zk_quorum = zk_quorum
+        self._znode_parent = znode_parent
+        self._zk_timeout = zk_timeout
+        self._kwargs = kwargs
         self.pool = None
 
     def __enter__(self):
@@ -339,46 +347,35 @@ class TidePool(object):
         """Build new Zookeeper session; start watching znode_parent's children.
 
         This method returns the pool, since that's what's really useful."""
+
         self._zk_session = KazooClient(
-            self.zk_quorum,
-            timeout=self.zk_timeout,
+            self._zk_quorum,
+            timeout=self._zk_timeout,
             read_only=True
         )
 
         # Start the session with Zookeeper
         try:
-            self._zk_session.start(self.zk_timeout)
+            self._zk_session.start(self._zk_timeout)
         except KazooTimeoutError:
             raise KiddieZookeeperException("Could not connect to zookeeper.")
 
-        # Spawn Zookeeper monitoring thread
-        self._zk_session.ChildrenWatch(self.znode_parent, func=self.set_hosts)
-
         # Do initial KiddiePool setup
         if not self.pool:
-            self.pool = KiddiePool(self._initial_hosts, **self.kwargs)
+            initial_hosts = self._zk_session.get_children(self._znode_parent)
 
-            del self._initial_hosts
+            self.pool = KiddiePool(initial_hosts, **self._kwargs)
+
+        # Spawn Zookeeper monitoring thread
+        self._zk_session.ChildrenWatch(
+            self._znode_parent, func=self.pool.set_hosts
+        )
 
         return self.pool
 
     def stop(self, *args):
-        """Stop Zookeeper session. Pool will remain but will not be updated."""
+        """Stop Zookeeper session. Pool will no longer be updated."""
         self._zk_session.stop()
-
-    def set_hosts(self, hosts):
-        """Used by Zookeeper as callback. Can also be run manually."""
-        if not self.pool:
-            self._initial_hosts = hosts
-            return
-
-        cleaned_hosts = []
-        for host_pair in hosts:
-            host, port = host_pair.split(':')
-            cleaned_hosts.append((host, int(port)))
-        random.shuffle(cleaned_hosts)
-
-        self.pool.candidate_pool = CandidatePool(cleaned_hosts)
 
 
 class KiddieClient(object):
@@ -432,6 +429,7 @@ class FakeConnection(object):
         self.host = kwargs.get('host', 'localhost')
         self.port = kwargs.get('port', 9000)
         self.closed = kwargs.get('closed', False)
+        self.tcp_keepalives = kwargs.get('tcp_keepalives', True)
 
     def connect(self, host, port):
         self.host = host
