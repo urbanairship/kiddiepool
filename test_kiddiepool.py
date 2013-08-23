@@ -263,18 +263,18 @@ class TestTidePool(mimic.MimicTestBase):
 
         self.mimic.replay_all()
 
-        self.tide_pool.start()
+        self.tide_pool.bind()
 
         self.assertEqual(
-            set(self.tide_pool.pool.candidate_pool),
+            set(self.tide_pool.candidate_pool),
             set([('tee', 123), ('tah', 321)])
         )
 
-        self.tide_pool.stop()
+        self.tide_pool.unbind()
 
     def test_zookeeper_timeout(self):
         # Timeout is 0, this should raise immediately
         self.assertRaises(
             kiddiepool.KiddieZookeeperException,
-            self.tide_pool.start
+            self.tide_pool.bind
         )

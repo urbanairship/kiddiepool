@@ -62,6 +62,17 @@ class KiddieClientRecvFailure(KiddieConnectionRecvFailure):
 
 class KiddieZookeeperException(KiddieException):
     """TidePool failed to connect to Zookeeper"""
+    def __init__(self, message, inner_exception):
+        super(KiddieZookeeperException, self).__init__(message)
+        self.inner_exception = inner_exception
+
+
+class TidePoolAlreadyBoundError(KiddieException):
+    """Attempted to bind a bound TidePool"""
+
+
+class TidePoolAlreadyUnboundError(KiddieException):
+    """Attempted to unbind an unbound TidePool"""
 
 
 class _ConnectionContext(object):
@@ -86,7 +97,8 @@ class _ConnectionContext(object):
 
 
 class KiddieConnection(object):
-    """TCP Base Connection Class
+    """
+    TCP Base Connection Class
 
     Features:
      * TCP Keepalives on by default
@@ -188,7 +200,8 @@ class KiddieConnection(object):
             self.close()
 
     def validate(self):
-        """Returns True if connection is still valid, otherwise False
+        """
+        Returns True if connection is still valid, otherwise False
 
         Takes into account socket status, idle time, and lifetime
         """
@@ -215,7 +228,7 @@ class KiddiePool(object):
      * Retries servers on faults
      * Rebalances by giving connections a lifetime and never culling candidate
        list (so bad servers will continue to get retried)
-     * host-port pairs can be reset on the fly
+     * Host-port pairs can be reset on the fly
 
      `connect_attempts` is the number of times to try to connect to the
      *entire* list of hosts.
@@ -244,10 +257,11 @@ class KiddiePool(object):
             self.connection_pool.put(kid)
 
     def _connect(self, conn):
-        """Make sure a resource is connected
+        """
+        Make sure a resource is connected
 
         Can take up to (retries * timeout) seconds to return.
-        Raises `KiddiePoolMaxTries` after exhausting retries on list of
+        Raises `KiddiePoolMaxAttempts` after exhausting retries on list of
         hosts.
         """
         # Rotate candidate pool so next connect starts on a different host
@@ -263,7 +277,8 @@ class KiddiePool(object):
             (self.connect_attempts, candidates))
 
     def get(self):
-        """Get a connection from the pool
+        """
+        Get a connection from the pool
 
         Raises `KiddiePoolEmpty` if no connections are available after
         pool_timeout. Can block up to (retries * timeout) + pool_timeout
@@ -289,11 +304,17 @@ class KiddiePool(object):
         return conn
 
     def validate(self, conn):
+        """
+        Return True if connection is still valid, otherwise False.
+
+        The socket may have closed or the host-port pair become invalid.
+        """
         host_tuple = (conn.host, conn.port)
         return conn.validate() and host_tuple in self.candidate_pool
 
     def put(self, conn):
-        """Put a connection back into the pool
+        """
+        Put a connection back into the pool
 
         Returns instantly (no blocking)
         """
@@ -317,65 +338,95 @@ class KiddiePool(object):
         self.candidate_pool = CandidatePool(cleaned_hosts)
 
 
-class TidePool(object):
-    """Multithreaded, ZooKeeper-bound KiddiePool wrapper.
+class TidePool(KiddiePool):
+    """Multithreaded, Zookeeper-bound KiddiePool wrapper.
 
     While context manager is active, a thread will monitor the children
     of the given znode and set them as the KiddiePool hosts whenever
     they change.
-
-    KiddiePool hosts can also be set manually, without using Zookeeper.
-
-    Any keyword arguments not listed will be passed on to KiddiePool.
     """
 
     def __init__(self, zk_quorum, znode_parent,
+                 auto_start=False, zk_read_only=True,
                  zk_timeout=DEFAULT_ZOOKEEPER_TIMEOUT, **kwargs):
+        """
+        Configure TidePool for Zookeeper and store KiddiePool kwargs.
+
+        zk_quorum    - comma-separated host-port pair string
+        znode_parent - The znode whose children contain host-port pairs
+        auto_start   - If True, call bind() during initialization
+        zk_read_only - If False, open read-write connection to Zookeeper
+        zk_timeout   - Time to wait before cancelling Zookeeper connection
+        **kwargs     - All other kwargs are passed to KiddiePool's __init__
+        """
         self._zk_quorum = zk_quorum
         self._znode_parent = znode_parent
         self._zk_timeout = zk_timeout
+        self._zk_read_only = zk_read_only
         self._kwargs = kwargs
-        self.pool = None
+
+        self._zk_session = None
+
+        if auto_start:
+            self.bind()
 
     def __enter__(self):
-        return self.start()
+        """Context manager start method -- Ensure TidePool is bound."""
+        if not self._zk_session:
+            self.bind()
+
+        return self
 
     def __exit__(self, *args):
-        return self.stop(*args)
+        """Context manager stop method -- Ensure TidePool is unbound."""
+        if self._zk_session:
+            self.unbind(*args)
 
-    def start(self):
-        """Build new Zookeeper session; start watching znode_parent's children.
+    def bind(self):
+        """Build new Zookeeper session. Watch self._znode_parent's children."""
 
-        This method returns the pool, since that's what's really useful."""
+        if self._zk_session:
+            raise TidePoolAlreadyBoundError(
+                "Could not bind previously bound TidePool instance."
+            )
 
-        self._zk_session = KazooClient(
-            self._zk_quorum,
-            timeout=self._zk_timeout,
-            read_only=True
-        )
-
-        # Start the session with Zookeeper
         try:
+            # Start the session with Zookeeper
+            self._zk_session = KazooClient(
+                self._zk_quorum,
+                timeout=self._zk_timeout,
+                read_only=self._zk_read_only,
+            )
             self._zk_session.start(self._zk_timeout)
-        except KazooTimeoutError:
-            raise KiddieZookeeperException("Could not connect to zookeeper.")
+        except KazooTimeoutError as ex:
+            # Tear down the session if connection attempt fails
+            self._zk_session = None
+            raise KiddieZookeeperException(
+                "Could not connect to zookeeper.", ex
+            )
 
         # Do initial KiddiePool setup
-        if not self.pool:
-            initial_hosts = self._zk_session.get_children(self._znode_parent)
-
-            self.pool = KiddiePool(initial_hosts, **self._kwargs)
+        initial_hosts = self._zk_session.get_children(self._znode_parent)
+        super(TidePool, self).__init__(initial_hosts, **self._kwargs)
 
         # Spawn Zookeeper monitoring thread
         self._zk_session.ChildrenWatch(
-            self._znode_parent, func=self.pool.set_hosts
+            self._znode_parent, func=self.set_hosts
         )
 
-        return self.pool
-
-    def stop(self, *args):
+    def unbind(self, *args):
         """Stop Zookeeper session. Pool will no longer be updated."""
+
+        if not self._zk_session:
+            raise TidePoolAlreadyUnboundError(
+                "Could not unbind already unbound TidePool instance."
+            )
+
+        # This stops the ChidrenWatch thread
+        # Calling .stop() does not throw errors if session failed to start
         self._zk_session.stop()
+
+        self._zk_session = None
 
 
 class KiddieClient(object):
