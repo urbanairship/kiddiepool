@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name='kiddiepool',
     url='https://github.com/urbanairship/kiddiepool',
-    version='0.2.1',
+    version='0.3.0',
     license='Apache',
     author='Michael Schurter',
     author_email='schmichael@urbanairship.com',
