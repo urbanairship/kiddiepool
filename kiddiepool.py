@@ -5,8 +5,8 @@ import random
 import socket
 import time
 
-from kazoo.client import KazooClient
-from kazoo.handlers.threading import TimeoutError as KazooTimeoutError
+from kazoo.exceptions import NoNodeError
+from kazoo.protocol.states import KazooState
 
 
 # Pool classes/defaults
@@ -60,19 +60,20 @@ class KiddieClientRecvFailure(KiddieConnectionRecvFailure):
     """KiddieClient failed to receive response"""
 
 
-class KiddieZookeeperException(KiddieException):
-    """TidePool failed to connect to Zookeeper"""
-    def __init__(self, message, inner_exception):
-        super(KiddieZookeeperException, self).__init__(message)
-        self.inner_exception = inner_exception
+class TidePoolException(KiddieException):
+    """KiddieException subclass for grouping TidePool errors."""
 
 
-class TidePoolAlreadyBoundError(KiddieException):
+class TidePoolAlreadyBoundError(TidePoolException):
     """Attempted to bind a bound TidePool"""
 
 
-class TidePoolAlreadyUnboundError(KiddieException):
+class TidePoolAlreadyUnboundError(TidePoolException):
     """Attempted to unbind an unbound TidePool"""
+
+
+class ZookeeperNotConnectedError(TidePoolException):
+    """Attempted to bind while zk_session not connected."""
 
 
 class _ConnectionContext(object):
@@ -346,87 +347,82 @@ class TidePool(KiddiePool):
     they change.
     """
 
-    def __init__(self, zk_quorum, znode_parent,
-                 auto_start=False, zk_read_only=True,
-                 zk_timeout=DEFAULT_ZOOKEEPER_TIMEOUT, **kwargs):
+    def __init__(self, zk_session, znode_parent,
+                 auto_bind=False, **kwargs):
         """
-        Configure TidePool for Zookeeper and store KiddiePool kwargs.
+        Initialize KiddiePool and store relevant Zookeeper data.
 
-        zk_quorum    - comma-separated host-port pair string
+        zk_session   - KazooClient session
         znode_parent - The znode whose children contain host-port pairs
-        auto_start   - If True, call bind() during initialization
-        zk_read_only - If False, open read-write connection to Zookeeper
-        zk_timeout   - Time to wait before cancelling Zookeeper connection
+        auto_bind    - If True, call bind() during __init__
         **kwargs     - All other kwargs are passed to KiddiePool's __init__
         """
-        self._zk_quorum = zk_quorum
+        super(TidePool, self).__init__([], **kwargs)
+
+        self._bound = False
+        self._zk_session = zk_session
         self._znode_parent = znode_parent
-        self._zk_timeout = zk_timeout
-        self._zk_read_only = zk_read_only
-        self._kwargs = kwargs
 
-        self._zk_session = None
-
-        if auto_start:
+        if auto_bind:
             self.bind()
 
     def __enter__(self):
         """Context manager start method -- Ensure TidePool is bound."""
-        if not self._zk_session:
+        if not self._bound:
             self.bind()
 
         return self
 
     def __exit__(self, *args):
         """Context manager stop method -- Ensure TidePool is unbound."""
-        if self._zk_session:
-            self.unbind(*args)
+        if self._bound:
+            self.unbind()
 
     def bind(self):
         """Build new Zookeeper session. Watch self._znode_parent's children."""
 
-        if self._zk_session:
+        if not self._zk_session._state != KazooState.CONNECTED:
+            raise ZookeeperNotConnectedError(
+                "Cannot bind because Zookeeper client is not connected."
+            )
+
+        if self._bound:
             raise TidePoolAlreadyBoundError(
-                "Could not bind previously bound TidePool instance."
+                "Cannot bind previously bound TidePool instance."
             )
 
-        try:
-            # Start the session with Zookeeper
-            self._zk_session = KazooClient(
-                self._zk_quorum,
-                timeout=self._zk_timeout,
-                read_only=self._zk_read_only,
-            )
-            self._zk_session.start(self._zk_timeout)
-        except KazooTimeoutError as ex:
-            # Tear down the session if connection attempt fails
-            self._zk_session = None
-            raise KiddieZookeeperException(
-                "Could not connect to zookeeper.", ex
-            )
-
-        # Do initial KiddiePool setup
-        initial_hosts = self._zk_session.get_children(self._znode_parent)
-        super(TidePool, self).__init__(initial_hosts, **self._kwargs)
+        self._bound = True
 
         # Spawn Zookeeper monitoring thread
-        self._zk_session.ChildrenWatch(
-            self._znode_parent, func=self.set_hosts
+        self._zk_session.DataWatch(
+            self._znode_parent, func=self._handle_znode_parent_change
         )
 
-    def unbind(self, *args):
+    def unbind(self):
         """Stop Zookeeper session. Pool will no longer be updated."""
 
-        if not self._zk_session:
+        if not self._bound:
             raise TidePoolAlreadyUnboundError(
                 "Could not unbind already unbound TidePool instance."
             )
 
-        # This stops the ChidrenWatch thread
-        # Calling .stop() does not throw errors if session failed to start
-        self._zk_session.stop()
+        self._zk_session._data_watchers.pop(self._znode_parent, None)
+        self._zk_session._child_watchers.pop(self._znode_parent, None)
 
-        self._zk_session = None
+        self._bound = False
+
+    def _handle_znode_parent_change(self, data, stats):
+        """Callback for znode_parent DataWatcher. Sets ChildrenWatcher."""
+        if data is not None and \
+                self._znode_parent not in self._zk_session._child_watchers:
+            try:
+                self._zk_session.ChildrenWatch(
+                    self._znode_parent, func=self.set_hosts
+                )
+            except NoNodeError:
+                # Node was deleted between created event receipt and request
+                # We will try again when next DataWatch event happens
+                pass
 
 
 class KiddieClient(object):
@@ -505,3 +501,21 @@ class FakeConnection(object):
 
     def validate(self):
         return True
+
+
+class FakeKazooClient(object):
+    def __init__(self):
+        self._child_watchers = {}
+        self._data_watchers = {}
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def DataWatch(znode, func=None):
+        return lambda x: x
+
+    def ChildrenWatch(znode, func=None):
+        return lambda x: x
