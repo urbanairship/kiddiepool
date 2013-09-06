@@ -381,7 +381,7 @@ class TidePool(KiddiePool):
     def bind(self):
         """Build new Zookeeper session. Watch self._znode_parent's children."""
 
-        if not self._zk_session._state != KazooState.CONNECTED:
+        if not self._zk_session._state is KazooState.CONNECTED:
             raise ZookeeperNotConnectedError(
                 "Cannot bind because Zookeeper client is not connected."
             )
@@ -507,6 +507,7 @@ class FakeKazooClient(object):
     def __init__(self):
         self._child_watchers = {}
         self._data_watchers = {}
+        self._state = KazooState.CONNECTED
 
     def start(self):
         pass
@@ -514,8 +515,8 @@ class FakeKazooClient(object):
     def stop(self):
         pass
 
-    def DataWatch(znode, func=None):
+    def DataWatch(self, znode, func=None):
         return lambda x: x
 
-    def ChildrenWatch(znode, func=None):
+    def ChildrenWatch(self, znode, func=None):
         return lambda x: x

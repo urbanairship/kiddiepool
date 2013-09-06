@@ -5,6 +5,8 @@ import mimic
 
 import kiddiepool
 
+from kazoo.exceptions import NoNodeError
+
 
 class TestKiddieConnection(mimic.MimicTestBase):
     def setUp(self):
@@ -239,42 +241,36 @@ class TestTidePool(mimic.MimicTestBase):
 
     def setUp(self):
         super(TestTidePool, self).setUp()
-        self.tide_pool = kiddiepool.TidePool('foo', 'bar', zk_timeout=0)
+        self.zk_session = kiddiepool.FakeKazooClient()
+        self.tide_pool = kiddiepool.TidePool(self.zk_session, 'bar')
 
-    def test_initial_hosts(self):
+    def test_bind_calls_DataWatch(self):
         # Stub out KazooClient
-        self.mimic.StubOutClassWithMocks(kiddiepool, 'KazooClient')
+        self.mimic.stub_out_with_mock(self.zk_session, 'DataWatch')
 
-        mock_zk_session = kiddiepool.KazooClient(
-            mimic.IgnoreArg(),
-            timeout=mimic.IgnoreArg(),
-            read_only=True
+        self.zk_session.DataWatch(
+            'bar', func=self.tide_pool._handle_znode_parent_change
         )
-
-        # ChildrenWatch is apparently created dynamically, so we have to add it
-        mock_zk_session.ChildrenWatch = self.mimic.CreateMockAnything()
-
-        mock_zk_session.start(mimic.IgnoreArg())
-        mock_zk_session.ChildrenWatch(
-            'bar', func=mimic.IgnoreArg()
-        )
-        mock_zk_session.get_children('bar').AndReturn(['tee:123', 'tah:321'])
-        mock_zk_session.stop()
 
         self.mimic.replay_all()
 
         self.tide_pool.bind()
-
-        self.assertEqual(
-            set(self.tide_pool.candidate_pool),
-            set([('tee', 123), ('tah', 321)])
-        )
-
         self.tide_pool.unbind()
 
-    def test_zookeeper_timeout(self):
-        # Timeout is 0, this should raise immediately
-        self.assertRaises(
-            kiddiepool.KiddieZookeeperException,
-            self.tide_pool.bind
-        )
+        self.assertTrue('bar' not in self.zk_session._data_watchers)
+        self.assertTrue('bar' not in self.zk_session._child_watchers)
+
+    def test_handle_znode_parent_change_calls_ChildrenWatch(self):
+        # Stub out KazooClient
+        self.mimic.stub_out_with_mock(self.zk_session, 'ChildrenWatch')
+
+        self.zk_session.ChildrenWatch(
+            self.tide_pool._znode_parent,
+            func=self.tide_pool.set_hosts
+        ).AndRaise(NoNodeError)
+
+        self.mimic.replay_all()
+
+        self.tide_pool._handle_znode_parent_change('herp,derp', {})
+
+        # Implicit assertion is that NoNodeError is swallowed
