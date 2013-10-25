@@ -242,23 +242,31 @@ class TestTidePool(mimic.MimicTestBase):
     def setUp(self):
         super(TestTidePool, self).setUp()
         self.zk_session = kiddiepool.FakeKazooClient()
-        self.tide_pool = kiddiepool.TidePool(self.zk_session, 'bar')
-
-    def test_bind_calls_DataWatch(self):
-        # Stub out KazooClient
-        self.mimic.stub_out_with_mock(self.zk_session, 'DataWatch')
-
-        self.zk_session.DataWatch(
-            'bar', func=self.tide_pool._handle_znode_parent_change
+        self.zk_session.start()
+        self.tide_pool = kiddiepool.TidePool(
+            self.zk_session, 'bar', deferred_bind=True,
+            connection_factory=kiddiepool.FakeConnection
         )
 
+    def test_bind_calls_DataWatch(self):
         self.mimic.replay_all()
 
         self.tide_pool.bind()
+
+        self.assertTrue(
+            self.tide_pool._data_watcher._watcher in
+            self.zk_session._data_watchers['bar']
+        )
+        self.assertTrue(
+            self.tide_pool._data_watcher in self.zk_session.state_listeners
+        )
+
         self.tide_pool.unbind()
 
-        self.assertTrue('bar' not in self.zk_session._data_watchers)
-        self.assertTrue('bar' not in self.zk_session._child_watchers)
+        self.assertTrue(
+            self.tide_pool._data_watcher not in
+            self.zk_session._data_watchers['bar']
+        )
 
     def test_handle_znode_parent_change_calls_ChildrenWatch(self):
         # Stub out KazooClient
@@ -274,3 +282,11 @@ class TestTidePool(mimic.MimicTestBase):
         self.tide_pool._handle_znode_parent_change('herp,derp', {})
 
         # Implicit assertion is that NoNodeError is swallowed
+
+    def test_bind_unconnected_zookeeper(self):
+        self.zk_session.stop()
+
+        self.assertRaises(
+            kiddiepool.ZookeeperNotConnectedError,
+            self.tide_pool.bind
+        )

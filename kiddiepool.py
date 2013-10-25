@@ -5,8 +5,9 @@ import random
 import socket
 import time
 
+from threading import Lock
+
 from kazoo.exceptions import NoNodeError
-from kazoo.protocol.states import KazooState
 
 
 # Pool classes/defaults
@@ -348,7 +349,7 @@ class TidePool(KiddiePool):
     """
 
     def __init__(self, zk_session, znode_parent,
-                 auto_bind=False, **kwargs):
+                 deferred_bind=False, **kwargs):
         """
         Initialize KiddiePool and store relevant Zookeeper data.
 
@@ -359,64 +360,79 @@ class TidePool(KiddiePool):
         """
         super(TidePool, self).__init__([], **kwargs)
 
-        self._bound = False
         self._zk_session = zk_session
         self._znode_parent = znode_parent
 
-        if auto_bind:
+        self._bind_lock = Lock()
+        self._data_watcher = None
+        self._child_watcher = None
+
+        if not deferred_bind:
             self.bind()
 
     def __enter__(self):
         """Context manager start method -- Ensure TidePool is bound."""
-        if not self._bound:
+        if not self._bind_lock.locked():
             self.bind()
 
         return self
 
     def __exit__(self, *args):
         """Context manager stop method -- Ensure TidePool is unbound."""
-        if self._bound:
+        if self._bind_lock.locked():
             self.unbind()
 
     def bind(self):
         """Build new Zookeeper session. Watch self._znode_parent's children."""
 
-        if not self._zk_session._state is KazooState.CONNECTED:
-            raise ZookeeperNotConnectedError(
-                "Cannot bind because Zookeeper client is not connected."
-            )
-
-        if self._bound:
+        if not self._bind_lock.acquire(False):
             raise TidePoolAlreadyBoundError(
                 "Cannot bind previously bound TidePool instance."
             )
 
-        self._bound = True
-
         # Spawn Zookeeper monitoring thread
-        self._zk_session.DataWatch(
+        self._data_watcher = self._zk_session.DataWatch(
             self._znode_parent, func=self._handle_znode_parent_change
         )
+
+        if self._data_watcher._watcher not in \
+                self._zk_session._data_watchers[self._znode_parent]:
+            raise ZookeeperNotConnectedError(
+                "Could not create DataWatcher. Usually means zk not connected."
+            )
 
     def unbind(self):
         """Stop Zookeeper session. Pool will no longer be updated."""
 
-        if not self._bound:
+        try:
+            self._bind_lock.release()
+        except RuntimeError:
             raise TidePoolAlreadyUnboundError(
                 "Could not unbind already unbound TidePool instance."
             )
 
-        self._zk_session._data_watchers.pop(self._znode_parent, None)
-        self._zk_session._child_watchers.pop(self._znode_parent, None)
+        # Remove the DataWatch event handler
+        if self._data_watcher is not None:
+            self._zk_session.remove_listener(self._data_watcher)
+            self._zk_session._data_watchers[self._znode_parent].discard(
+                self._data_watcher._watcher
+            )
+            self._data_watcher = None
 
-        self._bound = False
+        # Remove the ChildrenWatch event handler
+        if self._child_watcher is not None:
+            self._zk_session.remove_listener(self._child_watcher)
+            self._zk_session._child_watchers[self._znode_parent].discard(
+                self._child_watcher._watcher
+            )
+            self._child_watcher = None
 
     def _handle_znode_parent_change(self, data, stats):
         """Callback for znode_parent DataWatcher. Sets ChildrenWatcher."""
         if data is not None and \
                 self._znode_parent not in self._zk_session._child_watchers:
             try:
-                self._zk_session.ChildrenWatch(
+                self._child_watcher = self._zk_session.ChildrenWatch(
                     self._znode_parent, func=self.set_hosts
                 )
             except NoNodeError:
@@ -504,19 +520,36 @@ class FakeConnection(object):
 
 
 class FakeKazooClient(object):
+    class FakeWatcher(object):
+        def _watcher(self):
+            pass
+
     def __init__(self):
-        self._child_watchers = {}
-        self._data_watchers = {}
-        self._state = KazooState.CONNECTED
+        self.client_state = 'CLOSED'
+        self.state_listeners = set()
+        self._child_watchers = collections.defaultdict(set)
+        self._data_watchers = collections.defaultdict(set)
 
     def start(self):
-        pass
+        self.client_state = 'CONNECTED'
 
     def stop(self):
-        pass
+        self.client_state = 'CLOSED'
+
+    def add_listener(self, watcher):
+        self.state_listeners.add(watcher)
+
+    def remove_listener(self, watcher):
+        self.state_listeners.discard(watcher)
 
     def DataWatch(self, znode, func=None):
-        return lambda x: x
+        data_watcher = self.FakeWatcher()
+        self._data_watchers[znode].add(data_watcher._watcher)
+        self.add_listener(data_watcher)
+        return data_watcher
 
     def ChildrenWatch(self, znode, func=None):
-        return lambda x: x
+        child_watcher = self.FakeWatcher()
+        self._child_watchers[znode].add(child_watcher._watcher)
+        self.add_listener(child_watcher)
+        return child_watcher
