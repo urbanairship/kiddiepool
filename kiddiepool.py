@@ -5,7 +5,7 @@ import random
 import socket
 import time
 
-from threading import Lock
+from threading import Lock as threading_lock
 
 from kazoo.exceptions import NoNodeError
 
@@ -73,8 +73,8 @@ class TidePoolAlreadyUnboundError(TidePoolException):
     """Attempted to unbind an unbound TidePool"""
 
 
-class ZookeeperNotConnectedError(TidePoolException):
-    """Attempted to bind while zk_session not connected."""
+class TidePoolBindError(TidePoolException):
+    """Failed to bind TidePool to zk_session."""
 
 
 class _ConnectionContext(object):
@@ -349,21 +349,21 @@ class TidePool(KiddiePool):
     """
 
     def __init__(self, zk_session, znode_parent,
-                 deferred_bind=False, **kwargs):
+                 deferred_bind=False, lock=threading_lock, **kwargs):
         """
         Initialize KiddiePool and store relevant Zookeeper data.
 
-        zk_session   - KazooClient session
-        znode_parent - The znode whose children contain host-port pairs
-        auto_bind    - If True, call bind() during __init__
-        **kwargs     - All other kwargs are passed to KiddiePool's __init__
+        zk_session    - KazooClient session
+        znode_parent  - The znode whose children contain host-port pairs
+        deferred_bind - If True, don't call bind() during __init__
+        **kwargs      - All other kwargs are passed to KiddiePool's __init__
         """
         super(TidePool, self).__init__([], **kwargs)
 
         self._zk_session = zk_session
         self._znode_parent = znode_parent
 
-        self._bind_lock = Lock()
+        self._bind_lock = lock()
         self._data_watcher = None
         self._child_watcher = None
 
@@ -395,23 +395,14 @@ class TidePool(KiddiePool):
             self._znode_parent, func=self._handle_znode_parent_change
         )
 
-        if self._data_watcher._watcher not in \
-                self._zk_session._data_watchers[self._znode_parent]:
-            raise ZookeeperNotConnectedError(
-                "Could not create DataWatcher. Usually means zk not connected."
-            )
+        if self._data_watcher._session_watcher not in \
+                self._zk_session.state_listeners:
+            raise TidePoolBindError("Could not bind to Zookeeper session.")
 
     def unbind(self):
         """Stop Zookeeper session. Pool will no longer be updated."""
 
-        try:
-            self._bind_lock.release()
-        except RuntimeError:
-            raise TidePoolAlreadyUnboundError(
-                "Could not unbind already unbound TidePool instance."
-            )
-
-        # Remove the DataWatch event handler
+        # Completely remove the DataWatch event handler
         if self._data_watcher is not None:
             self._zk_session.remove_listener(self._data_watcher)
             self._zk_session._data_watchers[self._znode_parent].discard(
@@ -419,7 +410,7 @@ class TidePool(KiddiePool):
             )
             self._data_watcher = None
 
-        # Remove the ChildrenWatch event handler
+        # Completely remove the ChildrenWatch event handler
         if self._child_watcher is not None:
             self._zk_session.remove_listener(self._child_watcher)
             self._zk_session._child_watchers[self._znode_parent].discard(
@@ -427,8 +418,14 @@ class TidePool(KiddiePool):
             )
             self._child_watcher = None
 
+        # Ensure the lock is released, so TidePool can be rebound
+        try:
+            self._bind_lock.release()
+        except Exception:  # Unfortunately some locks throw different errors
+            pass
+
     def _handle_znode_parent_change(self, data, stats):
-        """Callback for znode_parent DataWatcher. Sets ChildrenWatcher."""
+        """Callback for znode_parent DataWatcher. Sets ChildWatcher."""
         if data is not None and \
                 self._znode_parent not in self._zk_session._child_watchers:
             try:

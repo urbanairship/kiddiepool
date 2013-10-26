@@ -282,11 +282,3 @@ class TestTidePool(mimic.MimicTestBase):
         self.tide_pool._handle_znode_parent_change('herp,derp', {})
 
         # Implicit assertion is that NoNodeError is swallowed
-
-    def test_bind_unconnected_zookeeper(self):
-        self.zk_session.stop()
-
-        self.assertRaises(
-            kiddiepool.ZookeeperNotConnectedError,
-            self.tide_pool.bind
-        )
