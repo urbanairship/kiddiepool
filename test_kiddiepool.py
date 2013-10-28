@@ -258,7 +258,8 @@ class TestTidePool(mimic.MimicTestBase):
             self.zk_session._data_watchers['bar']
         )
         self.assertTrue(
-            self.tide_pool._data_watcher in self.zk_session.state_listeners
+            self.tide_pool._data_watcher._session_watcher in
+            self.zk_session.state_listeners
         )
 
         self.tide_pool.unbind()

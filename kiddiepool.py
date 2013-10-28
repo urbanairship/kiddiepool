@@ -518,6 +518,9 @@ class FakeConnection(object):
 
 class FakeKazooClient(object):
     class FakeWatcher(object):
+        def _session_watcher(self):
+            pass
+
         def _watcher(self):
             pass
 
@@ -534,10 +537,10 @@ class FakeKazooClient(object):
         self.client_state = 'CLOSED'
 
     def add_listener(self, watcher):
-        self.state_listeners.add(watcher)
+        self.state_listeners.add(watcher._session_watcher)
 
     def remove_listener(self, watcher):
-        self.state_listeners.discard(watcher)
+        self.state_listeners.discard(watcher._session_watcher)
 
     def DataWatch(self, znode, func=None):
         data_watcher = self.FakeWatcher()
