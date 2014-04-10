@@ -4,6 +4,7 @@ import Queue as queue
 import random
 import socket
 import time
+import atexit
 
 from threading import Lock as threading_lock
 
@@ -370,18 +371,6 @@ class TidePool(KiddiePool):
         if not deferred_bind:
             self.bind()
 
-    def __enter__(self):
-        """Context manager start method -- Ensure TidePool is bound."""
-        if not self._bind_lock.locked():
-            self.bind()
-
-        return self
-
-    def __exit__(self, *args):
-        """Context manager stop method -- Ensure TidePool is unbound."""
-        if self._bind_lock.locked():
-            self.unbind()
-
     def bind(self):
         """Build new Zookeeper session. Watch self._znode_parent's children."""
 
@@ -398,6 +387,8 @@ class TidePool(KiddiePool):
         if self._data_watcher._session_watcher not in \
                 self._zk_session.state_listeners:
             raise TidePoolBindError("Could not bind to Zookeeper session.")
+
+        atexit.register(self.unbind)
 
     def unbind(self):
         """Stop Zookeeper session. Pool will no longer be updated."""
