@@ -9,10 +9,6 @@ from threading import Lock as threading_lock
 
 from kazoo.exceptions import NoNodeError
 
-import logging
-
-log = logging.getLogger(__name__)
-
 
 # Pool classes/defaults
 CandidatePool = collections.deque
