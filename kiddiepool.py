@@ -391,7 +391,7 @@ class TidePool(KiddiePool):
         """Stop Zookeeper session. Pool will no longer be updated."""
 
         # Completely remove the DataWatch event handler
-        if self._data_watcher is not None:
+        if self._data_watcher:
             self._zk_session.remove_listener(self._data_watcher)
             self._zk_session._data_watchers[self._znode_parent].discard(
                 self._data_watcher._watcher
@@ -399,7 +399,7 @@ class TidePool(KiddiePool):
             self._data_watcher = None
 
         # Completely remove the ChildrenWatch event handler
-        if self._child_watcher is not None:
+        if self._child_watcher:
             self._zk_session.remove_listener(self._child_watcher)
             self._zk_session._child_watchers[self._znode_parent].discard(
                 self._child_watcher._watcher
@@ -411,8 +411,7 @@ class TidePool(KiddiePool):
 
     def _handle_znode_parent_change(self, data, stats):
         """Callback for znode_parent DataWatcher. Sets ChildWatcher."""
-        if (data is not None and
-                self._znode_parent not in self._zk_session._child_watchers):
+        if data and self._znode_parent not in self._zk_session._child_watchers:
             try:
                 self._child_watcher = self._zk_session.ChildrenWatch(
                     self._znode_parent, func=self.set_hosts
