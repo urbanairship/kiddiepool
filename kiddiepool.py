@@ -4,11 +4,14 @@ import Queue as queue
 import random
 import socket
 import time
-import atexit
 
 from threading import Lock as threading_lock
 
 from kazoo.exceptions import NoNodeError
+
+import logging
+
+log = logging.getLogger(__name__)
 
 
 # Pool classes/defaults
@@ -384,11 +387,9 @@ class TidePool(KiddiePool):
             self._znode_parent, func=self._handle_znode_parent_change
         )
 
-        if self._data_watcher._session_watcher not in \
-                self._zk_session.state_listeners:
+        if (self._data_watcher._session_watcher not in
+                self._zk_session.state_listeners):
             raise TidePoolBindError("Could not bind to Zookeeper session.")
-
-        atexit.register(self.unbind)
 
     def unbind(self):
         """Stop Zookeeper session. Pool will no longer be updated."""
@@ -409,16 +410,13 @@ class TidePool(KiddiePool):
             )
             self._child_watcher = None
 
-        # Ensure the lock is released, so TidePool can be rebound
-        try:
-            self._bind_lock.release()
-        except Exception:  # Unfortunately some locks throw different errors
-            pass
+        # Release the lock, so TidePool can be rebound
+        self._bind_lock.release()
 
     def _handle_znode_parent_change(self, data, stats):
         """Callback for znode_parent DataWatcher. Sets ChildWatcher."""
-        if data is not None and \
-                self._znode_parent not in self._zk_session._child_watchers:
+        if (data is not None and
+                self._znode_parent not in self._zk_session._child_watchers):
             try:
                 self._child_watcher = self._zk_session.ChildrenWatch(
                     self._znode_parent, func=self.set_hosts
