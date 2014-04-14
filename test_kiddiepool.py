@@ -3,7 +3,11 @@ import socket
 
 import mimic
 
-import kiddiepool
+from kiddiepool import KiddieConnection, KiddiePool, TidePool
+from kiddiepool.fake import FakeConnection, FakeKazooClient
+from kiddiepool.exceptions import (
+    KiddieConnectionRecvFailure, KiddiePoolEmpty, KiddiePoolMaxAttempts
+)
 
 from kazoo.exceptions import NoNodeError
 
@@ -11,7 +15,7 @@ from kazoo.exceptions import NoNodeError
 class TestKiddieConnection(mimic.MimicTestBase):
     def setUp(self):
         super(TestKiddieConnection, self).setUp()
-        self.conn = kiddiepool.KiddieConnection()
+        self.conn = KiddieConnection()
 
     def test_simple_recvall(self):
         self.mimic.stub_out_with_mock(self.conn, 'recv')
@@ -44,7 +48,7 @@ class TestKiddieConnection(mimic.MimicTestBase):
         self.mimic.replay_all()
 
         self.assertRaises(
-            kiddiepool.KiddieConnectionRecvFailure,
+            KiddieConnectionRecvFailure,
             self.conn.recvall,
             10
         )
@@ -57,7 +61,7 @@ class TestKiddieConnection(mimic.MimicTestBase):
         self.mimic.replay_all()
 
         self.assertRaises(
-            kiddiepool.KiddieConnectionRecvFailure,
+            KiddieConnectionRecvFailure,
             self.conn.recvall,
             10
         )
@@ -74,7 +78,7 @@ class TestKiddieConnection(mimic.MimicTestBase):
         self.mimic.replay_all()
 
         self.assertRaises(
-            kiddiepool.KiddieConnectionRecvFailure,
+            KiddieConnectionRecvFailure,
             self.conn.recv,
             arbitrary_size,
             arbitrary_flags,
@@ -85,13 +89,13 @@ class TestKiddieConnection(mimic.MimicTestBase):
         mock_socket.setsockopt(
             mimic.IgnoreArg(), mimic.IgnoreArg(), mimic.IgnoreArg()
         )
-        self.mimic.stub_out_with_mock(kiddiepool.socket, 'create_connection')
-        kiddiepool.socket.create_connection(
+        self.mimic.stub_out_with_mock(socket, 'create_connection')
+        socket.create_connection(
             ('lol', 643), timeout=mimic.IgnoreArg()
         ).AndReturn(mock_socket)
 
         # Set max idle time to absurd number and remove lifetime, if any
-        self.conn = kiddiepool.KiddieConnection(max_idle=999, lifetime=None)
+        self.conn = KiddieConnection(max_idle=999, lifetime=None)
 
         self.mimic.replay_all()
 
@@ -105,13 +109,13 @@ class TestKiddieConnection(mimic.MimicTestBase):
         mock_socket.setsockopt(
             mimic.IgnoreArg(), mimic.IgnoreArg(), mimic.IgnoreArg()
         )
-        self.mimic.stub_out_with_mock(kiddiepool.socket, 'create_connection')
-        kiddiepool.socket.create_connection(
+        self.mimic.stub_out_with_mock(socket, 'create_connection')
+        socket.create_connection(
             ('foo', 123), timeout=mimic.IgnoreArg()
         ).AndReturn(mock_socket)
 
         # Set max idle time to 0 and remove lifetime, if any
-        self.conn = kiddiepool.KiddieConnection(max_idle=0, lifetime=None)
+        self.conn = KiddieConnection(max_idle=0, lifetime=None)
 
         self.mimic.replay_all()
 
@@ -125,13 +129,13 @@ class TestKiddieConnection(mimic.MimicTestBase):
         mock_socket.setsockopt(
             mimic.IgnoreArg(), mimic.IgnoreArg(), mimic.IgnoreArg()
         )
-        self.mimic.stub_out_with_mock(kiddiepool.socket, 'create_connection')
-        kiddiepool.socket.create_connection(
+        self.mimic.stub_out_with_mock(socket, 'create_connection')
+        socket.create_connection(
             ('bar', 321), timeout=mimic.IgnoreArg()
         ).AndReturn(mock_socket)
 
         # Set lifetime to 0 and make max_idle absurdly large
-        self.conn = kiddiepool.KiddieConnection(max_idle=999, lifetime=0)
+        self.conn = KiddieConnection(max_idle=999, lifetime=0)
 
         self.mimic.replay_all()
 
@@ -145,15 +149,15 @@ class TestKiddieConnection(mimic.MimicTestBase):
         mock_socket.setsockopt(
             mimic.IgnoreArg(), mimic.IgnoreArg(), mimic.IgnoreArg()
         )
-        self.mimic.stub_out_with_mock(kiddiepool.socket, 'create_connection')
+        self.mimic.stub_out_with_mock(socket, 'create_connection')
 
         # Set expectation that 987 is passed in at socket creation time
-        kiddiepool.socket.create_connection(
+        socket.create_connection(
             ('baz', 222), timeout=987
         ).AndReturn(mock_socket)
 
         # Set timeout to 987 in instantiation of KiddieConnection
-        self.conn = kiddiepool.KiddieConnection(timeout=987)
+        self.conn = KiddieConnection(timeout=987)
 
         self.mimic.replay_all()
 
@@ -163,9 +167,9 @@ class TestKiddieConnection(mimic.MimicTestBase):
 class TestKiddiePool(mimic.MimicTestBase):
     def setUp(self):
         super(TestKiddiePool, self).setUp()
-        self.pool = kiddiepool.KiddiePool(
+        self.pool = KiddiePool(
             ['foo:123', 'bar:321'],
-            connection_factory=kiddiepool.FakeConnection,
+            connection_factory=FakeConnection,
             connection_options={'tcp_keepalives': False},
             max_size=2,
             pool_timeout=.1,
@@ -182,7 +186,7 @@ class TestKiddiePool(mimic.MimicTestBase):
 
         # Make sure getting next connection throws KiddiePoolEmpty
         self.assertRaises(
-            kiddiepool.KiddiePoolEmpty,
+            KiddiePoolEmpty,
             self.pool.get
         )
 
@@ -191,7 +195,7 @@ class TestKiddiePool(mimic.MimicTestBase):
 
     def test_connect_attempts(self):
         # Make a kiddiepool and mock the connection
-        conn = kiddiepool.FakeConnection()
+        conn = FakeConnection()
 
         # Make sure it tries each host right number of times
         self.mimic.stub_out_with_mock(conn, 'connect')
@@ -204,7 +208,7 @@ class TestKiddiePool(mimic.MimicTestBase):
 
         # Make sure it raises KiddiePoolMaxAttempts as well
         self.assertRaises(
-            kiddiepool.KiddiePoolMaxAttempts,
+            KiddiePoolMaxAttempts,
             self.pool._connect,
             conn
         )
@@ -241,11 +245,11 @@ class TestTidePool(mimic.MimicTestBase):
 
     def setUp(self):
         super(TestTidePool, self).setUp()
-        self.zk_session = kiddiepool.FakeKazooClient()
+        self.zk_session = FakeKazooClient()
         self.zk_session.start()
-        self.tide_pool = kiddiepool.TidePool(
+        self.tide_pool = TidePool(
             self.zk_session, 'bar', deferred_bind=True,
-            connection_factory=kiddiepool.FakeConnection
+            connection_factory=FakeConnection
         )
 
     def test_bind_calls_DataWatch(self):

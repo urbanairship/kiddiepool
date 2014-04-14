@@ -1,14 +1,17 @@
-# Copyright 2012 Urban Airship
-import collections
-import Queue as queue
 import random
 import socket
-import time
-
+import Queue as queue
+import collections
 from threading import Lock as threading_lock
 
 from kazoo.exceptions import NoNodeError
 
+from kiddiepool.connection import KiddieConnection, _ConnectionContext
+from kiddiepool.exceptions import (
+    KiddieClientSendFailure, KiddieClientRecvFailure,
+    KiddiePoolEmpty, KiddiePoolMaxAttempts,
+    TidePoolBindError, TidePoolAlreadyBoundError
+)
 
 # Pool classes/defaults
 CandidatePool = collections.deque
@@ -17,210 +20,9 @@ DEFAULT_POOL_MAX = 10
 DEFAULT_POOL_TIMEOUT = 2
 DEFAULT_CONNECT_ATTEMPTS = 2
 
-# Connection defaults
-DEFAULT_MAX_IDLE = 60
-# Non-None lifetime allows slow rebalancing after failures
-DEFAULT_LIFETIME = 60 * 5
-DEFAULT_TIMEOUT = 3  # connect() and send() timeout
-
 DEFAULT_SEND_ATTEMPTS = 2
 
 DEFAULT_ZOOKEEPER_TIMEOUT = 10
-
-
-class KiddieException(Exception):
-    """Base class for Kiddie Exceptions"""
-
-
-class KiddiePoolEmpty(KiddieException, queue.Empty):
-    """No Kiddie connections available in pool (even after timeout)"""
-
-
-class KiddiePoolMaxAttempts(KiddieException, socket.error):
-    """Unable to connect to any Kiddie servers (even after timeout & retries)
-    """
-
-
-class KiddieSocketError(socket.error):
-    """Base class for KiddieClientSend/Recv failures."""
-
-
-class KiddieConnectionSendFailure(KiddieSocketError):
-    """ KiddieConnection failed to send request """
-
-
-class KiddieConnectionRecvFailure(KiddieSocketError):
-    """ KiddieConnection failed to receive response """
-
-
-class KiddieClientSendFailure(KiddieConnectionSendFailure):
-    """KiddieClient failed to send request"""
-
-
-class KiddieClientRecvFailure(KiddieConnectionRecvFailure):
-    """KiddieClient failed to receive response"""
-
-
-class TidePoolException(KiddieException):
-    """KiddieException subclass for grouping TidePool errors."""
-
-
-class TidePoolAlreadyBoundError(TidePoolException):
-    """Attempted to bind a bound TidePool"""
-
-
-class TidePoolAlreadyUnboundError(TidePoolException):
-    """Attempted to unbind an unbound TidePool"""
-
-
-class TidePoolBindError(TidePoolException):
-    """Failed to bind TidePool to zk_session."""
-
-
-class _ConnectionContext(object):
-    """Context Manager to handle Connections"""
-    def __init__(self, pool):
-        self.conn = None
-        self.pool = pool
-
-    def __enter__(self):
-        self.conn = self.pool.get()
-        return self.conn
-
-    def __exit__(self, exc_type, exc_value, exc_tb):
-        # Regardless of whether or not the connection is valid, put it back
-        # in the pool. The next get() will determine it's validity.
-        self.pool.put(self.conn)
-        if exc_type is not None:
-            # Let handle_exception suppress the exception if desired
-            return bool(
-                self.conn.handle_exception(exc_type, exc_value, exc_tb)
-            )
-
-
-class KiddieConnection(object):
-    """
-    TCP Base Connection Class
-
-    Features:
-     * TCP Keepalives on by default
-     * Configurable timeout for socket operations
-     * Tracks age and idle time for pools to refresh/cull idle/old connections
-    """
-
-    SendException = KiddieConnectionSendFailure
-    RecvException = KiddieConnectionRecvFailure
-
-    def __init__(self, lifetime=DEFAULT_LIFETIME, max_idle=DEFAULT_MAX_IDLE,
-                 tcp_keepalives=True, timeout=DEFAULT_TIMEOUT):
-        self.host = None
-        self.port = None
-        self.socket = None
-        self.max_idle = max_idle
-        self.tcp_keepalives = tcp_keepalives
-        self.timeout = timeout
-        self.last_touch = 0
-        # lifetime is how many seconds the connection lives
-        self.lifetime = lifetime
-        # endoflife is when the connection should die and be reconnected
-        self.endoflife = 0
-
-    @property
-    def closed(self):
-        return self.socket is None
-
-    def connect(self, host, port):
-        self.host = host
-        self.port = port
-        if self.socket is not None:
-            self.close()
-        try:
-            self._open()
-        except socket.error:
-            return False
-        else:
-            return True
-
-    def _open(self):
-        self.socket = socket.create_connection(
-            (self.host, self.port), timeout=self.timeout
-        )
-        if self.tcp_keepalives:
-            self.socket.setsockopt(
-                socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1
-            )
-
-        # Touch to update the idle check
-        self.touch()
-
-        # Reset endoflife
-        if self.lifetime is not None:
-            self.endoflife = time.time() + self.lifetime
-
-    def touch(self):
-        self.last_touch = time.time()
-
-    def close(self):
-        self.socket.close()
-        self.socket = None
-
-    def sendall(self, payload):
-        try:
-            self.socket.sendall(payload)
-        except socket.error as e:
-            raise self.SendException(e)
-        self.touch()
-
-    def recv(self, size, flags=0):
-        try:
-            data = self.socket.recv(size, flags)
-        except socket.error as e:
-            raise self.RecvException(e)
-        self.touch()
-        return data
-
-    def recvall(self, size):
-        """Receive `size` data and return it or raise a socket.error"""
-        data = []
-        received = 0
-        try:
-            while received < size:
-                chunk = self.recv(size - received)
-                if not chunk:
-                    raise self.RecvException(
-                        'Received %d bytes out of %d.' % (received, size)
-                    )
-                data.append(chunk)
-                received += len(chunk)
-        except socket.error as e:
-            raise self.RecvException(e)
-        return b"".join(data)
-
-    def handle_exception(self, exc_type, exc_value, exc_tb):
-        """Close connection on socket errors"""
-        if issubclass(exc_type, socket.error):
-            self.close()
-
-    def validate(self):
-        """
-        Returns True if connection is still valid, otherwise False
-
-        Takes into account socket status, idle time, and lifetime
-        """
-        if self.closed:
-            # Invalid because it's closed
-            return False
-
-        now = time.time()
-        if (now - self.last_touch) > self.max_idle:
-            # Invalid because it's been idle too long
-            return False
-
-        if self.lifetime is not None and self.endoflife < now:
-            # Invalid because it's outlived its lifetime
-            return False
-
-        return True
 
 
 class KiddiePool(object):
@@ -465,75 +267,3 @@ class KiddieClient(object):
                 'Failed to send request (%d bytes) after %d attempts. '
                 'Last exception: %r' % (len(request), attempts, e)
             )
-
-
-class FakeConnection(object):
-    """Connection class for testing (noops)"""
-    def __init__(self, *args, **kwargs):
-        self.host = kwargs.get('host', 'localhost')
-        self.port = kwargs.get('port', 9000)
-        self.closed = kwargs.get('closed', False)
-        self.tcp_keepalives = kwargs.get('tcp_keepalives', True)
-
-    def connect(self, host, port):
-        self.host = host
-        self.port = port
-        return True
-
-    def close(self):
-        self.closed = True
-
-    def sendall(self, payload):
-        pass
-
-    def recv(self, size, flags=0):
-        return ''
-
-    def recvall(self, size):
-        return ''
-
-    def handle_exception(self, et, ev, etb):
-        if issubclass(et, socket.error):
-            self.close()
-
-    def validate(self):
-        return True
-
-
-class FakeKazooClient(object):
-    class FakeWatcher(object):
-        def _session_watcher(self):
-            pass
-
-        def _watcher(self):
-            pass
-
-    def __init__(self):
-        self.client_state = 'CLOSED'
-        self.state_listeners = set()
-        self._child_watchers = collections.defaultdict(set)
-        self._data_watchers = collections.defaultdict(set)
-
-    def start(self):
-        self.client_state = 'CONNECTED'
-
-    def stop(self):
-        self.client_state = 'CLOSED'
-
-    def add_listener(self, watcher):
-        self.state_listeners.add(watcher._session_watcher)
-
-    def remove_listener(self, watcher):
-        self.state_listeners.discard(watcher._session_watcher)
-
-    def DataWatch(self, znode, func=None):
-        data_watcher = self.FakeWatcher()
-        self._data_watchers[znode].add(data_watcher._watcher)
-        self.add_listener(data_watcher)
-        return data_watcher
-
-    def ChildrenWatch(self, znode, func=None):
-        child_watcher = self.FakeWatcher()
-        self._child_watchers[znode].add(child_watcher._watcher)
-        self.add_listener(child_watcher)
-        return child_watcher
