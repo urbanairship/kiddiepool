@@ -209,7 +209,8 @@ class TidePool(KiddiePool):
 
     def _handle_znode_parent_change(self, data, stats):
         """Callback for znode_parent DataWatcher. Sets ChildWatcher."""
-        if data and self._znode_parent not in self._zk_session._child_watchers:
+        if (data is not None and
+                self._znode_parent not in self._zk_session._child_watchers):
             try:
                 self._child_watcher = self._zk_session.ChildrenWatch(
                     self._znode_parent, func=self.set_hosts
