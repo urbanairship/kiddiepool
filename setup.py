@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='kiddiepool',
@@ -9,7 +9,7 @@ setup(
     author_email='platform@urbanairship.com',
     description='An extensible driver framework with pooling',
     long_description=open('README.rst').read(),
-    py_modules=['kiddiepool', 'test_kiddiepool'],
+    packages=find_packages(),
     install_requires=['kazoo==1.3.1'],
     tests_require=['mimic'],
     test_suite='test_kiddiepool',
