@@ -1,5 +1,6 @@
 from .connection import KiddieConnection
 from .pool import KiddiePool, TidePool
+from .client import KiddieClient
 from .exceptions import (
     KiddieException,
     KiddiePoolEmpty,
@@ -15,6 +16,7 @@ __all__ = [
     'KiddieConnection',
     'KiddiePool',
     'TidePool',
+    'KiddieClient',
     'KiddieException',
     'KiddiePoolEmpty',
     'KiddiePoolMaxAttempts',
