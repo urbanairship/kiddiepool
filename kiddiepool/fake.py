@@ -43,13 +43,13 @@ class FakeKazooClient(object):
         def _watcher(self):
             pass
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         self.client_state = 'CLOSED'
         self.state_listeners = set()
         self._child_watchers = collections.defaultdict(set)
         self._data_watchers = collections.defaultdict(set)
 
-    def start(self):
+    def start(self, timeout=15):
         self.client_state = 'CONNECTED'
 
     def stop(self):
