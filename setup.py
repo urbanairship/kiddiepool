@@ -12,6 +12,6 @@ setup(
     packages=find_packages(),
     install_requires=['kazoo==1.3.1'],
     tests_require=['mimic'],
-    test_suite='test_kiddiepool',
+    test_suite='tests',
     classifiers=['License :: OSI Approved :: Apache Software License'],
 )
