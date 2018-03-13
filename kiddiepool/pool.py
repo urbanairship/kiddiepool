@@ -1,9 +1,11 @@
 import random
-import Queue as queue
+try:
+    import queue as queue
+except ImportError:
+    # python2
+    import Queue as queue
 import collections
 from threading import Lock as threading_lock
-
-from kazoo.exceptions import NoNodeError
 
 from kiddiepool.connection import KiddieConnection, _ConnectionContext
 from kiddiepool.exceptions import (
@@ -145,7 +147,6 @@ class TidePool(KiddiePool):
     of the given znode and set them as the KiddiePool hosts whenever
     they change.
     """
-
     def __init__(self, zk_session, znode_parent,
                  deferred_bind=False, lock=threading_lock, **kwargs):
         """
@@ -157,6 +158,16 @@ class TidePool(KiddiePool):
         **kwargs      - All other kwargs are passed to KiddiePool's __init__
         """
         super(TidePool, self).__init__([], **kwargs)
+
+        # ensure kazoo is available on init; this prevents us from erroring
+        # later in the process, and should catch any folks who want zookeeper
+        # support, but neglected to install kiddiepool properly for zookeeper
+        try:
+            import kazoo  # noqa
+        except ImportError:
+            raise ImportError(
+                'unable to import `kazoo` module; ensure you have installed '
+                'kiddiepool with optional zookeeper support')
 
         self._zk_session = zk_session
         self._znode_parent = znode_parent
@@ -209,6 +220,8 @@ class TidePool(KiddiePool):
 
     def _handle_znode_parent_change(self, data, stats):
         """Callback for znode_parent DataWatcher. Sets ChildWatcher."""
+        from kazoo.exceptions import NoNodeError
+
         if (data is not None and
                 self._znode_parent not in self._zk_session._child_watchers):
             try:

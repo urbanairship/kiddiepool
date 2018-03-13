@@ -1,7 +1,7 @@
-import time
+from mock import patch, call, Mock
 import socket
-
-import mimic
+import time
+import unittest
 
 from kiddiepool import KiddieConnection, KiddiePool, TidePool
 from kiddiepool.fake import FakeConnection, FakeKazooClient
@@ -12,159 +12,115 @@ from kiddiepool.exceptions import (
 from kazoo.exceptions import NoNodeError
 
 
-class TestKiddieConnection(mimic.MimicTestBase):
+class TestKiddieConnection(unittest.TestCase):
     def setUp(self):
         super(TestKiddieConnection, self).setUp()
         self.conn = KiddieConnection()
 
-    def test_simple_recvall(self):
-        self.mimic.stub_out_with_mock(self.conn, 'recv')
-        self.conn.recv(3).and_return('123')
+    def _patch_recv(self):
+        recv_patch = patch.object(self.conn, 'recv')
+        self.addCleanup(recv_patch.stop)
 
-        self.mimic.replay_all()
+        return recv_patch.start()
+
+    def test_simple_recvall(self):
+        recv_mock = self._patch_recv()
+        recv_mock.return_value = b'123'
 
         data = self.conn.recvall(3)
-        self.assertEqual('123', data)
+        self.assertEqual(b'123', data)
+        recv_mock.assert_called_with(3)
 
     def test_multi_read_recvall(self):
-        self.mimic.stub_out_with_mock(self.conn, 'recv')
-        self.conn.recv(10).and_return('123')
-        self.conn.recv(7).and_return('456')
-        self.conn.recv(4).and_return('789')
-        self.conn.recv(1).and_return('0')
-
-        self.mimic.replay_all()
+        recv_mock = self._patch_recv()
+        recv_mock.side_effect = [
+            b'123',
+            b'456',
+            b'789',
+            b'0',
+        ]
 
         data = self.conn.recvall(10)
-        self.assertEqual('1234567890', data)
+        self.assertEqual(b'1234567890', data)
+        self.assertEqual(recv_mock.call_args_list,
+                         [call(10), call(7), call(4), call(1)])
 
     def test_failed_recvall(self):
-        self.mimic.stub_out_with_mock(self.conn, 'recv')
-        self.conn.recv(10).and_return('123')
-        self.conn.recv(7).and_return('456')
-        self.conn.recv(4).and_return('789')
-        self.conn.recv(1).and_return('')
+        recv_mock = self._patch_recv()
+        recv_mock.side_effect = [
+            b'123',
+            b'456',
+            b'789',
+            b'',
+        ]
 
-        self.mimic.replay_all()
-
-        self.assertRaises(
-            KiddieConnectionRecvFailure,
-            self.conn.recvall,
-            10
-        )
+        with self.assertRaises(KiddieConnectionRecvFailure):
+            self.conn.recvall(10)
 
     def test_broken_pipe(self):
-        self.mimic.stub_out_with_mock(self.conn, 'recv')
-        self.conn.recv(10)\
-            .and_raise(socket.error(socket.errno.EPIPE, 'Broken pipe'))
+        recv_mock = self._patch_recv()
+        recv_mock.side_effect = socket.error(socket.errno.EPIPE,
+                                             'Broken pipe')
 
-        self.mimic.replay_all()
-
-        self.assertRaises(
-            KiddieConnectionRecvFailure,
-            self.conn.recvall,
-            10
-        )
+        with self.assertRaises(KiddieConnectionRecvFailure):
+            self.conn.recvall(10)
 
     def test_socket_error_conversion_to_kiddiepool_socket_error(self):
         arbitrary_size = 10
         arbitrary_flags = 0
 
-        self.conn.socket = self.mimic.create_mock_anything()
-        self.conn.socket.recv(arbitrary_size, arbitrary_flags).and_raise(
-            socket.error
-        )
+        with patch.object(self.conn, 'socket') as socket_mock:
+            socket_mock.recv = Mock(side_effect=socket.error)
 
-        self.mimic.replay_all()
+            with self.assertRaises(KiddieConnectionRecvFailure):
+                self.conn.recv(arbitrary_size, arbitrary_flags)
 
-        self.assertRaises(
-            KiddieConnectionRecvFailure,
-            self.conn.recv,
-            arbitrary_size,
-            arbitrary_flags,
-        )
-
-    def test_connection_valid(self):
-        mock_socket = self.mimic.create_mock_anything()
-        mock_socket.setsockopt(
-            mimic.IgnoreArg(), mimic.IgnoreArg(), mimic.IgnoreArg()
-        )
-        self.mimic.stub_out_with_mock(socket, 'create_connection')
-        socket.create_connection(
-            ('lol', 643), timeout=mimic.IgnoreArg()
-        ).AndReturn(mock_socket)
-
+    @patch.object(socket, 'create_connection')
+    def test_connection_valid(self, mock_conn):
         # Set max idle time to absurd number and remove lifetime, if any
         self.conn = KiddieConnection(max_idle=999, lifetime=None)
-
-        self.mimic.replay_all()
 
         self.conn.connect('lol', 643)
 
         # Make sure connection is valid
         self.assertTrue(self.conn.validate())
 
-    def test_max_idle(self):
-        mock_socket = self.mimic.create_mock_anything()
-        mock_socket.setsockopt(
-            mimic.IgnoreArg(), mimic.IgnoreArg(), mimic.IgnoreArg()
-        )
-        self.mimic.stub_out_with_mock(socket, 'create_connection')
-        socket.create_connection(
-            ('foo', 123), timeout=mimic.IgnoreArg()
-        ).AndReturn(mock_socket)
+        self.assertEqual(mock_conn.call_count, 1)
+        args, kwargs = mock_conn.call_args
+        self.assertEqual(args, (('lol', 643),))
 
+    @patch.object(socket, 'create_connection')
+    def test_max_idle(self, _):
         # Set max idle time to 0 and remove lifetime, if any
         self.conn = KiddieConnection(max_idle=0, lifetime=None)
-
-        self.mimic.replay_all()
 
         self.conn.connect('foo', 123)
 
         # Make sure we invalidate a connection immediately
         self.assertFalse(self.conn.validate())
 
-    def test_connection_end_of_life(self):
-        mock_socket = self.mimic.create_mock_anything()
-        mock_socket.setsockopt(
-            mimic.IgnoreArg(), mimic.IgnoreArg(), mimic.IgnoreArg()
-        )
-        self.mimic.stub_out_with_mock(socket, 'create_connection')
-        socket.create_connection(
-            ('bar', 321), timeout=mimic.IgnoreArg()
-        ).AndReturn(mock_socket)
-
+    @patch.object(socket, 'create_connection')
+    def test_connection_end_of_life(self, _):
         # Set lifetime to 0 and make max_idle absurdly large
         self.conn = KiddieConnection(max_idle=999, lifetime=0)
-
-        self.mimic.replay_all()
 
         self.conn.connect('bar', 321)
 
         # Make sure we invalidate a connection immediately
         self.assertFalse(self.conn.validate())
 
-    def test_timeout(self):
-        mock_socket = self.mimic.create_mock_anything()
-        mock_socket.setsockopt(
-            mimic.IgnoreArg(), mimic.IgnoreArg(), mimic.IgnoreArg()
-        )
-        self.mimic.stub_out_with_mock(socket, 'create_connection')
-
-        # Set expectation that 987 is passed in at socket creation time
-        socket.create_connection(
-            ('baz', 222), timeout=987
-        ).AndReturn(mock_socket)
-
+    @patch.object(socket, 'create_connection')
+    def test_timeout(self, mock_conn):
         # Set timeout to 987 in instantiation of KiddieConnection
         self.conn = KiddieConnection(timeout=987)
 
-        self.mimic.replay_all()
-
         self.conn.connect('baz', 222)
 
+        self.assertEqual(mock_conn.call_count, 1)
+        self.assertEqual(mock_conn.call_args, call(('baz', 222), timeout=987))
 
-class TestKiddiePool(mimic.MimicTestBase):
+
+class TestKiddiePool(unittest.TestCase):
     def setUp(self):
         super(TestKiddiePool, self).setUp()
         self.pool = KiddiePool(
@@ -197,21 +153,18 @@ class TestKiddiePool(mimic.MimicTestBase):
         # Make a kiddiepool and mock the connection
         conn = FakeConnection()
 
-        # Make sure it tries each host right number of times
-        self.mimic.stub_out_with_mock(conn, 'connect')
-        conn.connect('foo', 123).InAnyOrder().AndReturn(False)
-        conn.connect('foo', 123).InAnyOrder().AndReturn(False)
-        conn.connect('bar', 321).InAnyOrder().AndReturn(False)
-        conn.connect('bar', 321).InAnyOrder().AndReturn(False)
+        with patch.object(conn, 'connect') as mock_connect:
+            mock_connect.return_value = False
 
-        self.mimic.replay_all()
+            with self.assertRaises(KiddiePoolMaxAttempts):
+                self.pool._connect(conn)
 
-        # Make sure it raises KiddiePoolMaxAttempts as well
-        self.assertRaises(
-            KiddiePoolMaxAttempts,
-            self.pool._connect,
-            conn
-        )
+            self.assertEqual(sorted(mock_connect.call_args_list), sorted([
+                call('foo', 123),
+                call('foo', 123),
+                call('bar', 321),
+                call('bar', 321),
+            ]))
 
     def test_connection_options(self):
         # Pass connection options into kiddiepool (in setUp)
@@ -240,7 +193,7 @@ class TestKiddiePool(mimic.MimicTestBase):
         self.assertEqual(conn2.port, 666)
 
 
-class TestTidePool(mimic.MimicTestBase):
+class TestTidePool(unittest.TestCase):
     """Don't test kazoo. Test the implementation of kazoo, though."""
 
     def setUp(self):
@@ -253,8 +206,6 @@ class TestTidePool(mimic.MimicTestBase):
         )
 
     def test_bind_calls_DataWatch(self):
-        self.mimic.replay_all()
-
         self.tide_pool.bind()
 
         self.assertTrue(
@@ -275,15 +226,12 @@ class TestTidePool(mimic.MimicTestBase):
 
     def test_handle_znode_parent_change_calls_ChildrenWatch(self):
         # Stub out KazooClient
-        self.mimic.stub_out_with_mock(self.zk_session, 'ChildrenWatch')
+        with patch.object(self.zk_session, 'ChildrenWatch') as mock_watch:
+            mock_watch.side_effect = NoNodeError
 
-        self.zk_session.ChildrenWatch(
-            self.tide_pool._znode_parent,
-            func=self.tide_pool.set_hosts
-        ).AndRaise(NoNodeError)
+            self.tide_pool._handle_znode_parent_change('herp,derp', {})
 
-        self.mimic.replay_all()
+            mock_watch.assert_called_with(self.tide_pool._znode_parent,
+                                          func=self.tide_pool.set_hosts)
 
-        self.tide_pool._handle_znode_parent_change('herp,derp', {})
-
-        # Implicit assertion is that NoNodeError is swallowed
+            # Implicit assertion is that NoNodeError is swallowed

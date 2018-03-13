@@ -1,11 +1,11 @@
 import os
 import time
-import sys
 
 from kazoo.testing import harness
+
 from unittest import skipIf
-from nose.tools import make_decorator
 import kiddiepool
+
 
 @skipIf(
     not os.getenv('ZOOKEEPER_PATH'),
@@ -30,5 +30,5 @@ class BasicPoolBehavior(harness.KazooTestHarness):
         time.sleep(0.5)
         assert len(self.pool.candidate_pool) == 1
         host, port = self.FAKE_HOST.split(':')
-        host_tuple = (unicode(host), int(port))
+        host_tuple = (str(host), int(port))
         assert host_tuple in self.pool.candidate_pool

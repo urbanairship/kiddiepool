@@ -22,10 +22,10 @@ class FakeConnection(object):
         pass
 
     def recv(self, size, flags=0):
-        return ''
+        return b''
 
     def recvall(self, size):
-        return ''
+        return b''
 
     def handle_exception(self, et, ev, etb):
         if issubclass(et, socket.error):

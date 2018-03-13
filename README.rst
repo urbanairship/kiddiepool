@@ -13,7 +13,15 @@ Goals
 -----
 
 * Create a reusable connection pool class that handles failover
-* Allow connection pool to discover service locations via Zookeeper
+* Optionally allow connection pool to discover service locations via Zookeeper
+
+Installation
+------------
+
+.. code::
+
+  pip install kiddiepool  # without optional zookeeper support
+  pip install kiddiepool[zookeeper]  # with optional zookeeper support
 
 Creating a New Client
 ---------------------
@@ -35,6 +43,10 @@ Using a static pool
 
 Using a dynamic pool
 ~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+
+   Ensure you have installed the package with zookeeper support.
 
 #. Instantiate a TidePool with the Zookeeper quorum and znode whose children
    to monitor.

@@ -1,4 +1,8 @@
-import Queue as queue
+try:
+    import queue as queue
+except ImportError:
+    # python2
+    import Queue as queue
 import socket
 
 
