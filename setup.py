@@ -6,7 +6,7 @@ tests_require = ['mock'] + zookeeper_extras
 setup(
     name='kiddiepool',
     url='https://github.com/urbanairship/kiddiepool',
-    version='2.0.0rc1',
+    version='2.0.0',
     license='Apache',
     author='Urban Airship',
     author_email='platform@urbanairship.com',
